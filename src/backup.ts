@@ -1,7 +1,8 @@
 import * as db from "./db";
-import type { FileRecord, Highlight, Settings } from "./types";
+import type { FileRecord, Highlight, Mark, Settings } from "./types";
 
-// JSON yedek: vurgular, notlar, yer imleri, kaldığın yer ve ayarlar. Dosyaların kendisi yedeğe girmez.
+// JSON yedek: vurgular, notlar, Yaz modu işaretleri, yer imleri, kaldığın yer ve ayarlar.
+// Dosyaların kendisi ve AI API anahtarı yedeğe girmez.
 
 export interface Backup {
   app: "calisma-masasi";
@@ -10,17 +11,19 @@ export interface Backup {
   settings: Settings;
   files: Omit<FileRecord, "handle">[];
   highlights: Highlight[];
+  marks?: Mark[];
 }
 
 export async function createBackup(): Promise<Backup> {
-  const [settings, files, highlights] = await Promise.all([db.loadSettings(), db.allFiles(), db.allHighlights()]);
+  const [settings, files, highlights, marks] = await Promise.all([db.loadSettings(), db.allFiles(), db.allHighlights(), db.allMarks()]);
   return {
     app: "calisma-masasi",
     version: 1,
     createdAt: new Date().toISOString(),
-    settings,
+    settings: { ...settings, ai: { ...settings.ai, apiKey: "" } },
     files: files.map(({ handle: _h, ...rest }) => rest),
     highlights,
+    marks,
   };
 }
 
@@ -39,12 +42,17 @@ export function parseBackup(text: string): Backup {
 }
 
 /** Yedekteki kayıtları ekler; aynı kimlikli vurgular yedektekiyle değişir, diğerleri kalır. */
-export async function restoreBackup(b: Backup): Promise<{ highlights: number; files: number }> {
+export async function restoreBackup(b: Backup): Promise<{ highlights: number; files: number; marks: number }> {
   for (const f of b.files) {
     const existing = await db.getFile(f.hash);
     await db.putFile({ ...f, handle: existing?.handle, lastOpened: Math.max(f.lastOpened, existing?.lastOpened ?? 0) });
   }
   await db.putHighlights(b.highlights);
-  if (b.settings) await db.saveSettings(b.settings);
-  return { highlights: b.highlights.length, files: b.files.length };
+  await db.putMarks(b.marks ?? []);
+  if (b.settings) {
+    // Yedekte anahtar yok: bu tarayıcıdaki anahtar korunur.
+    const current = await db.loadSettings();
+    await db.saveSettings({ ...b.settings, ai: { ...current.ai, ...b.settings.ai, apiKey: current.ai.apiKey } });
+  }
+  return { highlights: b.highlights.length, files: b.files.length, marks: b.marks?.length ?? 0 };
 }

@@ -50,6 +50,20 @@ describe("toMarkdown", () => {
     expect(md).not.toContain("Tanım 4.7");
   });
 
+  it("metin kutuları ve notlar sayfada yerlerine göre girer", () => {
+    const marks = [
+      { id: "t", fileHash: "x", page: 111, kind: "text" as const, color: "blue" as const, box: [0.1, 0.3, 0.3, 0.05] as [number, number, number, number], text: "Z = standartlaştırma", createdAt: 0, updatedAt: 0 },
+      { id: "s", fileHash: "x", page: 111, kind: "sticky" as const, ai: true, box: [0.7, 0.9, 0.2, 0.1] as [number, number, number, number], text: "Kısa açıklama\nikinci satır", createdAt: 0, updatedAt: 0 },
+      { id: "i", fileHash: "x", page: 2, kind: "ink" as const, color: "red" as const, width: 2, points: [[0, 0]] as [number, number][], createdAt: 0, updatedAt: 0 },
+    ];
+    const md = toMarkdown(list, { ...base, marks });
+    expect(md).toContain("_3 vurgu · 2 not · 2 yazı");
+    expect(md).toContain("- **[Önemli]** normal dağılımdır; iki parametreyle\n- **[Metin kutusu]** Z = standartlaştırma\n- **[Tanım]** Tanım 4.7.");
+    expect(md).toContain("- **[AI notu]** Kısa açıklama\n  ikinci satır");
+    expect(md).not.toContain("Sayfa 3");
+    expect(toMarkdown(list, { ...base, groupBy: "color", marks })).toContain("## Yazılar\n\n- **[s. 112 · Metin kutusu]**");
+  });
+
   it("dosya adı", () => {
     expect(exportFileName("IST201_Bolum4.PDF")).toBe("IST201_Bolum4-notlar.md");
   });

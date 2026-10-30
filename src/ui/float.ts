@@ -7,6 +7,8 @@ export interface FloatActions {
   note(): void;
   copy(): void;
   remove(): void;
+  /** Yalnızca AI açıkken: seçimi kapsam yaparak AI panelini açar. */
+  ask?(): void;
 }
 
 export interface FloatAnchor {
@@ -46,7 +48,7 @@ export class FloatBar {
     return !this.el.hidden;
   }
 
-  show(anchor: FloatAnchor, mode: "new" | "applied", names: Record<Color, string>, active?: Color, stageTop = 0): void {
+  show(anchor: FloatAnchor, mode: "new" | "applied", names: Record<Color, string>, active?: Color, stageTop = 0, ai = false): void {
     this.mode = mode;
     this.bar.replaceChildren(
       ...COLORS.map((c) => {
@@ -62,6 +64,9 @@ export class FloatBar {
       h("span", { class: "cm-float__sep" }),
       h("button", { class: "cm-float__act", tabindex: "-1", onclick: () => this.actions.note() }, "Not ekle ", kbd("N")),
       h("button", { class: "cm-float__act", tabindex: "-1", onclick: () => this.actions.copy() }, "Kopyala ", kbd("C")),
+      ...(ai && this.actions.ask
+        ? [h("span", { class: "cm-float__sep" }), h("button", { class: "cm-float__act", tabindex: "-1", onclick: () => this.actions.ask!() }, "Sor ", kbd("A"))]
+        : []),
       ...(mode === "applied"
         ? [h("span", { class: "cm-float__sep" }), h("button", { class: "cm-float__act cm-float__act--danger", tabindex: "-1", onclick: () => this.actions.remove() }, "Sil ", kbd("Del"))]
         : []),

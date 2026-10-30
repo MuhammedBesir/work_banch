@@ -1,13 +1,22 @@
 import { fold, num } from "../format";
 import { readingOrder } from "../geometry";
-import type { Color, Highlight } from "../types";
+import type { Color, Highlight, Mark } from "../types";
 import { COLORS } from "../types";
 import { h, kbd, marker } from "../util";
 
 export type SortBy = "page" | "time" | "color";
+type Kind = "all" | "hl" | "text" | "draw";
+
+/** Panelde bir satır: bir vurgu ya da Yaz modu işareti (çizimler sayfa başına tek satır). */
+type Row =
+  | { type: "hl"; it: Highlight; page: number; y: number; x: number; created: number }
+  | { type: "mark"; marks: Mark[]; page: number; y: number; x: number; created: number; id: string };
 
 export interface PanelActions {
   jump(h: Highlight): void;
+  jumpMark(m: Mark): void;
+  editMark(m: Mark): void;
+  removeMark(id: string): void;
   saveNote(id: string, note: string): void;
   remove(id: string): void;
   resize(width: number): void;
@@ -29,6 +38,9 @@ export class Panel {
   private editingId: string | null = null;
   private newId: string | null = null;
   private items: Highlight[] = [];
+  private marks: Mark[] = [];
+  private kind: Kind = "all";
+  private kinds: HTMLElement;
   private names: Record<Color, string>;
   private currentPage = 0;
   private programmaticScroll = false;
@@ -44,6 +56,7 @@ export class Panel {
       this.render();
     });
     this.chips = h("div", { class: "cm-chips", role: "group", "aria-label": "Renge göre filtrele" });
+    this.kinds = h("div", { class: "cm-chips", role: "group", "aria-label": "Türe göre filtrele", hidden: true });
     this.followBtn = h("button", { class: "cm-linkbtn is-on", "aria-pressed": "true", onclick: () => this.setFollow(!this.follow) }, "Sayfayı takip et");
     const sortSel = h("select", { class: "cm-select", "aria-label": "Sırala" },
       h("option", { value: "page", text: "Sırala: Sayfa" }),
@@ -61,7 +74,7 @@ export class Panel {
     );
     const head = h("div", { class: "cm-panel__head" },
       h("div", { class: "cm-panel__title" }, h("span", { text: "İşaretler" }), this.countEl),
-      search, this.chips, tools,
+      search, this.kinds, this.chips, tools,
     );
     this.list = h("div", { class: "cm-list", role: "list", tabindex: "-1" });
     this.list.addEventListener("keydown", this.onListKey);
@@ -82,9 +95,10 @@ export class Panel {
     this.el = h("aside", { class: "cm-panel", "aria-label": "Vurgular ve notlar" }, resize, head, this.list, this.returnBar, foot);
   }
 
-  setData(items: Highlight[], names: Record<Color, string>): void {
+  setData(items: Highlight[], names: Record<Color, string>, marks: Mark[] = this.marks): void {
     this.items = items;
     this.names = names;
+    this.marks = marks;
     this.render();
   }
 
@@ -167,6 +181,7 @@ export class Panel {
   }
 
   private visible(): Highlight[] {
+    if (this.kind !== "all" && this.kind !== "hl") return [];
     const q = fold(this.query.trim());
     return this.items.filter((it) =>
       (this.filter.size === 0 || this.filter.has(it.color)) &&
@@ -174,8 +189,41 @@ export class Panel {
     );
   }
 
+  /** Yaz modu satırları: metin kutusu ve not tek tek, kalem ve şekiller sayfa başına tek satır. */
+  private markRows(): Row[] {
+    if (this.kind === "hl" || this.filter.size) return [];
+    const q = fold(this.query.trim());
+    const rows: Row[] = [];
+    const draw = new Map<number, Mark[]>();
+    for (const m of this.marks) {
+      if (m.kind === "text" || m.kind === "sticky") {
+        if (this.kind === "draw" || !m.text.trim()) continue;
+        if (q && !fold(m.text).includes(q)) continue;
+        rows.push({ type: "mark", marks: [m], page: m.page, y: m.box[1], x: m.box[0], created: m.createdAt, id: m.id });
+      } else if (this.kind !== "text" && !q) {
+        draw.set(m.page, [...(draw.get(m.page) ?? []), m]);
+      }
+    }
+    for (const [page, list] of draw) {
+      const first = list.reduce((a, b) => (boxY(b) < boxY(a) ? b : a));
+      rows.push({ type: "mark", marks: list, page, y: boxY(first), x: 0, created: Math.max(...list.map((m) => m.createdAt)), id: `draw-${page}` });
+    }
+    return rows;
+  }
+
+  private rows(): Row[] {
+    const hl: Row[] = this.visible().map((it) => ({ type: "hl", it, page: it.page, y: it.rects[0]?.[1] ?? 0, x: it.rects[0]?.[0] ?? 0, created: it.createdAt }));
+    const all = [...hl, ...this.markRows()];
+    if (this.sort === "time") return all.sort((a, b) => b.created - a.created);
+    if (this.sort === "color") {
+      const color = (r: Row) => (r.type === "hl" ? r.it.color : 9);
+      return all.sort((a, b) => color(a) - color(b) || a.page - b.page || a.y - b.y || a.x - b.x);
+    }
+    return all.sort((a, b) => a.page - b.page || a.y - b.y || a.x - b.x || (a.type === "hl" && b.type === "hl" ? readingOrder(a.it, b.it) : 0));
+  }
+
   private toggleAll(): void {
-    const keys = new Set(this.visible().map((it) => groupKey(this.sort, it)));
+    const keys = new Set(this.rows().map((r) => rowKey(this.sort, r)));
     const allCollapsed = [...keys].every((k) => this.collapsed.has(k));
     if (allCollapsed) this.collapsed.clear();
     else keys.forEach((k) => this.collapsed.add(k));
@@ -187,6 +235,7 @@ export class Panel {
     for (const it of this.items) counts.set(it.color, (counts.get(it.color) ?? 0) + 1);
     const chip = (label: Node[], on: boolean, onclick: () => void) =>
       h("button", { class: `cm-chip${on ? " is-on" : ""}`, "aria-pressed": String(on), onclick }, ...label);
+    this.chips.hidden = this.kind === "text" || this.kind === "draw";
     this.chips.replaceChildren(
       chip([document.createTextNode("Tümü "), h("span", { class: "cm-num", text: num(this.items.length) })], this.filter.size === 0, () => {
         this.filter.clear();
@@ -202,20 +251,36 @@ export class Panel {
         }),
       ),
     );
+    // Tür filtresi yalnızca Yaz modu işaretleri varken görünür.
+    const texts = this.marks.filter((m) => (m.kind === "text" || m.kind === "sticky") && m.text.trim()).length;
+    const draws = this.marks.filter((m) => m.kind === "ink" || m.kind === "shape").length;
+    this.kinds.hidden = texts + draws === 0;
+    const kindChip = (k: Kind, label: string, n: number) =>
+      chip([document.createTextNode(`${label} `), h("span", { class: "cm-num", text: num(n) })], this.kind === k, () => {
+        this.kind = k;
+        this.render();
+      });
+    this.kinds.replaceChildren(
+      kindChip("all", "Tümü", this.items.length + texts + draws),
+      kindChip("hl", "Vurgu", this.items.length),
+      kindChip("text", "Yazı", texts),
+      kindChip("draw", "Çizim", draws),
+    );
   }
 
   render(): void {
-    this.countEl.textContent = num(this.items.length);
+    const writeCount = this.marks.filter((m) => !((m.kind === "text" || m.kind === "sticky") && !m.text.trim())).length;
+    this.countEl.textContent = num(this.items.length + writeCount);
     this.renderChips();
     const scroll = this.list.scrollTop;
 
-    if (!this.items.length) {
+    if (!this.items.length && !writeCount) {
       this.list.replaceChildren(this.tutorial());
       return;
     }
-    const vis = this.visible();
-    if (!vis.length) {
-      const reason = this.query.trim() ? `"${this.query.trim()}" için vurgu ya da not bulunamadı.` : "Seçili renklerde vurgu yok.";
+    const rows = this.rows();
+    if (!rows.length) {
+      const reason = this.query.trim() ? `"${this.query.trim()}" için işaret ya da not bulunamadı.` : "Bu filtrede işaret yok.";
       this.list.replaceChildren(
         h("div", { class: "cm-panel__empty" },
           h("p", { style: "margin:0", text: reason }),
@@ -225,23 +290,16 @@ export class Panel {
       return;
     }
 
-    const sorted = [...vis].sort(
-      this.sort === "time" ? (a, b) => b.createdAt - a.createdAt
-        : this.sort === "color" ? (a, b) => a.color - b.color || readingOrder(a, b)
-        : readingOrder,
-    );
     const frag = document.createDocumentFragment();
     let lastKey = "";
-    for (let i = 0; i < sorted.length; i++) {
-      const it = sorted[i];
-      const key = groupKey(this.sort, it);
+    for (const r of rows) {
+      const key = rowKey(this.sort, r);
       if (this.sort !== "time" && key !== lastKey) {
         lastKey = key;
-        const members = sorted.filter((x) => groupKey(this.sort, x) === key);
-        frag.append(this.groupHead(key, it, members));
+        frag.append(this.groupHead(key, r, rows.filter((x) => rowKey(this.sort, x) === key)));
       }
       if (this.sort !== "time" && this.collapsed.has(key)) continue;
-      frag.append(this.itemRow(it));
+      frag.append(r.type === "hl" ? this.itemRow(r.it) : this.markRow(r));
     }
     this.list.replaceChildren(frag);
     this.list.scrollTop = scroll;
@@ -251,15 +309,16 @@ export class Panel {
   private clearFilter(): void {
     this.query = "";
     this.filter.clear();
+    this.kind = "all";
     (this.el.querySelector("input[type=search]") as HTMLInputElement).value = "";
     this.render();
   }
 
-  private groupHead(key: string, first: Highlight, members: Highlight[]): HTMLElement {
+  private groupHead(key: string, first: Row, members: Row[]): HTMLElement {
     const collapsed = this.collapsed.has(key);
-    const label = this.sort === "page" ? `Sayfa ${num(first.page + 1)}` : this.names[first.color];
+    const label = this.sort === "page" ? `Sayfa ${num(first.page + 1)}` : first.type === "hl" ? this.names[first.it.color] : "Yazı ve çizim";
     const marks = h("span", { class: "cm-group__marks" });
-    if (collapsed) for (const c of new Set(members.map((m) => m.color))) marks.append(marker(c));
+    if (collapsed) for (const c of new Set(members.flatMap((m) => (m.type === "hl" ? [m.it.color] : [])))) marks.append(marker(c));
     const btn = h("button", {
       class: "cm-group__head",
       "aria-expanded": String(!collapsed),
@@ -274,6 +333,46 @@ export class Panel {
       h("span", { class: "cm-num", text: num(members.length) }),
     );
     return btn;
+  }
+
+  /** Yaz modu satırı: metin kutusu (T), yapışkan not (N), AI notu ya da sayfanın çizimleri. */
+  private markRow(r: Extract<Row, { type: "mark" }>): HTMLElement {
+    const m = r.marks[0];
+    let badge: HTMLElement;
+    let body: HTMLElement;
+    let label: string;
+    if (m.kind === "text" || m.kind === "sticky") {
+      label = m.kind === "text" ? "Metin kutusu" : m.ai ? "AI notu" : "Yapışkan not";
+      badge = h("span", { class: `cm-kind${m.kind === "sticky" ? " cm-kind--sticky" : ""}`, text: m.kind === "text" ? "T" : m.ai ? "AI" : "N" });
+      body = h("div", {},
+        h("div", { class: "cm-item__quote cm-item__quote--plain", text: m.text }),
+        h("div", { class: "cm-item__meta" }, h("span", {}, h("span", { class: "cm-num", text: `s. ${num(m.page + 1)}` }), ` · ${label}`),
+          h("button", { class: "cm-item__add", tabindex: "-1", onclick: (e: Event) => (e.stopPropagation(), this.actions.editMark(m)) }, "Düzenle")),
+      );
+    } else {
+      const ink = r.marks.filter((x) => x.kind === "ink");
+      const shapes = r.marks.length - ink.length;
+      const color = (ink[0] ?? m) as Extract<Mark, { kind: "ink" | "shape" }>;
+      label = [ink.length ? `Kalem · ${num(ink.length)} çizgi` : "", shapes ? `${num(shapes)} şekil` : ""].filter(Boolean).join(", ");
+      badge = h("span", { class: `cm-penmark cm-penmark--${color.color}` });
+      body = h("div", {},
+        h("div", { class: "cm-item__quote cm-muted", text: "El yazısı ve çizimler aranamaz." }),
+        h("div", { class: "cm-item__meta" }, h("span", {}, h("span", { class: "cm-num", text: `s. ${num(r.page + 1)}` }), ` · ${label}`)),
+      );
+    }
+    const row = h("div", {
+      class: `cm-item${this.selectedId === r.id ? " is-selected" : ""}`,
+      role: "listitem",
+      tabindex: "0",
+      "data-id": r.id,
+      "data-mark": "1",
+      "aria-label": `${label}, sayfa ${r.page + 1}`,
+    }, badge, body);
+    row.addEventListener("click", () => {
+      this.select(r.id, false);
+      this.actions.jumpMark(m);
+    });
+    return row;
   }
 
   private itemRow(it: Highlight): HTMLElement {
@@ -350,7 +449,17 @@ export class Panel {
     const key = e.key.toLowerCase();
     if (key === "j" || e.key === "ArrowDown") rows[Math.min(rows.length - 1, i + 1)]?.focus();
     else if (key === "k" || e.key === "ArrowUp") rows[Math.max(0, i - 1)]?.focus();
-    else if (e.key === "Enter" && id) {
+    else if (cur?.dataset.mark && id) {
+      // Yaz modu satırı: Enter atlar, E düzenler, Delete siler (çizim satırı yalnızca atlar).
+      const mark = this.marks.find((m) => m.id === id) ?? this.marks.find((m) => `draw-${m.page}` === id);
+      if (!mark) return;
+      if (e.key === "Enter") (this.select(id, false), this.actions.jumpMark(mark));
+      else if (key === "e" && mark.id === id) this.actions.editMark(mark);
+      else if ((e.key === "Delete" || e.key === "Backspace") && mark.id === id) {
+        (rows[i + 1] ?? rows[i - 1])?.focus();
+        this.actions.removeMark(id);
+      } else return;
+    } else if (e.key === "Enter" && id) {
       const it = this.items.find((x) => x.id === id);
       if (it) (this.select(id, false), this.actions.jump(it));
     } else if (key === "e" && id) this.editNote(id);
@@ -408,3 +517,5 @@ export class Panel {
 }
 
 const groupKey = (sort: SortBy, it: Highlight) => (sort === "color" ? `c${it.color}` : `p${it.page}`);
+const rowKey = (sort: SortBy, r: Row) => (sort === "color" ? (r.type === "hl" ? `c${r.it.color}` : "c9") : `p${r.page}`);
+const boxY = (m: Mark) => (m.kind === "ink" ? Math.min(...m.points.map((p) => p[1])) : m.kind === "shape" ? Math.min(m.from[1], m.to[1]) : m.box[1]);

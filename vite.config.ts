@@ -1,7 +1,7 @@
 /// <reference types="vitest" />
 import { defineConfig, type Plugin } from "vite";
 
-// Üretim derlemesinde sıkı CSP: üçüncü taraf script yok, ağ isteği yok.
+// Üretim derlemesinde sıkı CSP: üçüncü taraf script yok; tek dış bağlantı (AI açıksa) Anthropic API.
 // Geliştirmede Vite'ın HMR bağlantısını bozmamak için eklenmez.
 const csp: Plugin = {
   name: "csp",
@@ -14,7 +14,8 @@ const csp: Plugin = {
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' blob: data:",
       "font-src 'self' data:",
-      "connect-src 'self' blob: data:",
+      // AI açıkken istekler yalnızca kullanıcının kendi anahtarıyla Anthropic API'sine gider.
+      "connect-src 'self' blob: data: https://api.anthropic.com",
       "object-src 'none'",
       "base-uri 'none'",
       "form-action 'none'",

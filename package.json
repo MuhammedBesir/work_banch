@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.134.0",
     "@fontsource/ibm-plex-mono": "5.1.0",
     "@fontsource/ibm-plex-sans": "5.1.0",
     "@fontsource/source-serif-4": "5.1.0",

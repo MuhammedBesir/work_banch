@@ -1,22 +1,28 @@
-import type { FileRecord, Highlight, Settings } from "./types";
+import type { FileRecord, Highlight, Mark, Settings } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
 
 // Tüm veri bu tarayıcıda, IndexedDB'de yaşar. Hiçbir şey ağa gitmez.
 
 const DB_NAME = "calisma-masasi";
-const VERSION = 1;
+const VERSION = 2;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
 function open(): Promise<IDBDatabase> {
   dbPromise ??= new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, VERSION);
-    req.onupgradeneeded = () => {
+    req.onupgradeneeded = (e) => {
       const db = req.result;
-      db.createObjectStore("files", { keyPath: "hash" });
-      const hl = db.createObjectStore("highlights", { keyPath: "id" });
-      hl.createIndex("fileHash", "fileHash");
-      db.createObjectStore("meta");
+      if (e.oldVersion < 1) {
+        db.createObjectStore("files", { keyPath: "hash" });
+        const hl = db.createObjectStore("highlights", { keyPath: "id" });
+        hl.createIndex("fileHash", "fileHash");
+        db.createObjectStore("meta");
+      }
+      if (e.oldVersion < 2) {
+        // Yaz modu işaretleri (v1.1)
+        db.createObjectStore("marks", { keyPath: "id" }).createIndex("fileHash", "fileHash");
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -84,12 +90,40 @@ export async function countHighlights(fileHash: string): Promise<number> {
   return wrap(s.index("fileHash").count(fileHash));
 }
 
+export async function marksFor(fileHash: string): Promise<Mark[]> {
+  return wrap((await store("marks")).index("fileHash").getAll(fileHash));
+}
+
+export async function allMarks(): Promise<Mark[]> {
+  return wrap((await store("marks")).getAll());
+}
+
+export async function putMark(m: Mark): Promise<void> {
+  await wrap((await store("marks", "readwrite")).put(m));
+}
+
+export async function putMarks(list: Mark[]): Promise<void> {
+  const tx = (await open()).transaction("marks", "readwrite");
+  const s = tx.objectStore("marks");
+  for (const m of list) s.put(m);
+  await new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+export async function deleteMark(id: string): Promise<void> {
+  await wrap((await store("marks", "readwrite")).delete(id));
+}
+
 export async function loadSettings(): Promise<Settings> {
   const saved: Partial<Settings> | undefined = await wrap((await store("meta")).get("settings"));
   return {
     ...DEFAULT_SETTINGS,
     ...saved,
     names: { ...DEFAULT_SETTINGS.names, ...saved?.names },
+    ai: { ...DEFAULT_SETTINGS.ai, ...saved?.ai },
+    pen: { ...DEFAULT_SETTINGS.pen, ...saved?.pen },
   };
 }
 
@@ -98,8 +132,9 @@ export async function saveSettings(s: Settings): Promise<void> {
 }
 
 export async function clearAll(): Promise<void> {
-  const tx = (await open()).transaction(["files", "highlights", "meta"], "readwrite");
-  for (const name of ["files", "highlights", "meta"]) tx.objectStore(name).clear();
+  const stores = ["files", "highlights", "marks", "meta"];
+  const tx = (await open()).transaction(stores, "readwrite");
+  for (const name of stores) tx.objectStore(name).clear();
   await new Promise<void>((resolve, reject) => {
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);

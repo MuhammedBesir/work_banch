@@ -171,6 +171,7 @@ export class Viewer {
       y += hgt + GAP;
     }
     this.root.style.minWidth = `${Math.round(this.maxWidth() * this.scale) + PAD_X * 2}px`;
+    this.root.style.setProperty("--z", String(this.scale)); // Yaz modu katmanı zoom ile ölçeklenir
     this.root.classList.toggle("is-paged", this.scrollMode === "paged");
     for (const p of this.pages) this.drawHighlights(p.index);
   }
@@ -541,14 +542,15 @@ export class Viewer {
     return normalizeRects(textRects(range), this.pages[page].el.getBoundingClientRect());
   }
 
-  showSearchHit(page: number | null, rects: Rect[]): void {
+  /** Arama eşleşmesi ya da AI kaynağının dayanak metni (`cite`: noktalı alt çizgi). */
+  showSearchHit(page: number | null, rects: Rect[], kind: "search" | "cite" = "search"): void {
     for (const p of this.pages) p.search.replaceChildren();
     if (page === null) return;
     const p = this.pages[page];
     const W = p.w * this.scale;
     const H = p.h * this.scale;
     for (const [x, y, w, hh] of rects) {
-      const r = h("div", { class: "cm-searchhit" });
+      const r = h("div", { class: kind === "cite" ? "cm-citehit" : "cm-searchhit" });
       r.style.cssText = `left:${x * W - 2}px;top:${y * H - 2}px;width:${w * W + 4}px;height:${hh * H + 4}px`;
       p.search.append(r);
     }

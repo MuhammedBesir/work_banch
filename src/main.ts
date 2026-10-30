@@ -14,14 +14,19 @@ import * as db from "./db";
 import { createBackup, parseBackup, restoreBackup } from "./backup";
 import { num, percent } from "./format";
 import { readingOrder, rotateRect } from "./geometry";
-import { looksLikePdf, looksScanned, loadOutline, OpenError, openPdf } from "./pdf/load";
+import { looksLikePdf, looksScanned, loadOutline, OpenError, openPdf, pageText, type OutlineItem } from "./pdf/load";
 import { Viewer, type SelectionPart } from "./pdf/viewer";
 import { PageEditor, type EditPage } from "./editor/pageEditor";
-import type { Color, FileRecord, Highlight, Settings } from "./types";
+import type { AiContext, Cite } from "./ai/prompt";
+import type { AiSettings, Color, FileRecord, Highlight, Mark, Settings } from "./types";
 import { COLORS } from "./types";
 import { announce, download, h, isTyping, kbd, sha256, uid } from "./util";
 import { confirmDialog } from "./ui/dialog";
-import { askPassword, BIG_BYTES, BIG_PAGES, confirmBigFile, openExport, openSettings, openShortcuts } from "./ui/dialogs";
+import { AiPanel, type Scope } from "./ui/ai";
+import { askPassword, BIG_BYTES, BIG_PAGES, confirmBigFile, openAiSetup, openExport, openSettings, openShortcuts } from "./ui/dialogs";
+import { markBox, rotateMark } from "./write/geometry";
+import { renderMarks } from "./write/layer";
+import { WriteMode } from "./write/writeMode";
 import { FloatBar } from "./ui/float";
 import { Home, type RecentRow } from "./ui/home";
 import { openMenu } from "./ui/menu";
@@ -63,7 +68,15 @@ interface Reader {
   modeSeg: HTMLElement;
   pageFlag: HTMLElement;
   editor: PageEditor | null;
+  write: WriteMode;
+  ai: AiPanel;
+  aiBtn: HTMLButtonElement;
+  rtabs: HTMLElement;
+  outline: OutlineItem[];
+  mode: Mode;
 }
+
+type Mode = "read" | "write" | "edit";
 
 const app = document.getElementById("app")!;
 const isNarrow = () => matchMedia("(max-width: 1100px)").matches;
@@ -82,6 +95,11 @@ let railOpen = true;
 let panelOpen = true;
 let focusMode = false;
 let persistAsked = false;
+let marks: Mark[] = [];
+let marksByPage = new Map<number, Mark[]>();
+let rightTab: "marks" | "ai" = "marks";
+/** Son metin seçimi: AI'nın "Seçim" kapsamı için (Sor düğmesine basınca seçim kaybolsa da kalır). */
+let lastSelection: SelectionPart[] | null = null;
 
 // ---------- Tema ve ayarlar ----------
 
@@ -98,7 +116,8 @@ function applySettings(): void {
   if (reader) {
     reader.body.style.setProperty("--panel-width", `${settings.panelWidth}px`);
     reader.themeBtn.textContent = resolvedTheme() === "dark" ? "Açık tema" : "Koyu tema";
-    reader.panel.setData(highlights, settings.names);
+    reader.panel.setData(highlights, settings.names, marks);
+    updateAiUi();
   }
 }
 
@@ -122,7 +141,52 @@ function settingsDialog(): void {
     restore: () => pickBackup(),
     wipe: () => void wipeAll(),
     shortcuts: openShortcuts,
+    ai: aiSetup,
   });
+}
+
+function aiSetup(): void {
+  openAiSetup(settings.ai, (ai: AiSettings) => void changeSettings({ ...settings, ai }));
+}
+
+const aiOn = () => settings.ai.mode === "cloud";
+
+/** AI kapalıyken AI'a dair hiçbir düğme görünmez. */
+function updateAiUi(): void {
+  if (!reader) return;
+  const on = aiOn();
+  reader.aiBtn.hidden = !on;
+  reader.rtabs.hidden = !on;
+  if (!on && rightTab === "ai") showRightTab("marks");
+  if (on && rightTab === "ai") reader.ai.refresh();
+}
+
+function showRightTab(tab: "marks" | "ai"): void {
+  if (!reader) return;
+  rightTab = tab;
+  reader.panel.el.hidden = tab !== "marks";
+  reader.ai.el.hidden = tab !== "ai";
+  reader.rtabs.querySelectorAll<HTMLButtonElement>(".cm-tab").forEach((b) => {
+    const on = b.dataset.tab === tab;
+    b.classList.toggle("is-on", on);
+    b.setAttribute("aria-selected", String(on));
+  });
+  reader.aiBtn.classList.toggle("is-on", tab === "ai" && panelOpen);
+  reader.aiBtn.setAttribute("aria-pressed", String(tab === "ai" && panelOpen));
+  if (tab === "ai") reader.ai.refresh();
+}
+
+/** Ctrl J: AI sekmesini aç/kapat. */
+function toggleAi(): void {
+  if (!reader || !aiOn()) return;
+  if (panelOpen && rightTab === "ai") {
+    showRightTab("marks");
+    return;
+  }
+  if (!panelOpen) togglePanel(true);
+  if (focusMode) setFocus(false);
+  showRightTab("ai");
+  reader.ai.focus();
 }
 
 function pickBackup(): void {
@@ -135,9 +199,13 @@ function pickBackup(): void {
       const r = await restoreBackup(b);
       settings = await db.loadSettings();
       applySettings();
-      if (reader) await reloadHighlights();
+      if (reader) {
+        await reloadHighlights();
+        marks = await db.marksFor(reader.file.rec.hash);
+        refreshMarks();
+      }
       else await showHome();
-      toast(`${num(r.highlights)} vurgu ve ${num(r.files)} dosya kaydı geri yüklendi`);
+      toast(`${num(r.highlights)} vurgu, ${num(r.marks)} işaret ve ${num(r.files)} dosya kaydı geri yüklendi`);
     } catch (err) {
       toast(err instanceof Error ? err.message : "Yedek geri yüklenemedi.", undefined, 6000);
     }
@@ -298,11 +366,77 @@ function refreshHighlights(pages?: number[]): void {
   indexHighlights();
   if (pages) pages.forEach((p) => reader!.viewer.drawHighlights(p));
   else reader.viewer.redrawAllHighlights();
-  reader.panel.setData(highlights, settings.names);
-  reader.panelBtn.querySelector(".cm-num")!.textContent = num(highlights.length);
-  const marks = new Map<number, Set<Color>>();
-  for (const [p, list] of byPage) marks.set(p, new Set(list.map((x) => x.color)));
-  reader.rail.setMarks(marks);
+  reader.panel.setData(highlights, settings.names, marks);
+  updatePanelCount();
+  const dots = new Map<number, Set<Color>>();
+  for (const [p, list] of byPage) dots.set(p, new Set(list.map((x) => x.color)));
+  reader.rail.setMarks(dots);
+}
+
+function updatePanelCount(): void {
+  if (!reader) return;
+  const n = highlights.length + marks.filter((m) => !((m.kind === "text" || m.kind === "sticky") && !m.text.trim())).length;
+  reader.panelBtn.querySelector(".cm-num")!.textContent = num(n);
+}
+
+// ---------- Yaz modu işaretleri ----------
+
+function indexMarks(): void {
+  marksByPage = new Map();
+  for (const m of marks) marksByPage.set(m.page, [...(marksByPage.get(m.page) ?? []), m]);
+}
+
+function drawMarks(page: number): void {
+  if (!reader) return;
+  const el = reader.viewer.pageElement(page);
+  const list = marksByPage.get(page) ?? [];
+  if (!el || (!list.length && !el.querySelector(".cm-page__marks"))) return;
+  renderMarks(el, page, list, {
+    editable: reader.write.editableMarks,
+    selectedId: reader.write.selectedId,
+    onSticky: (id, collapsed) => {
+      const m = marks.find((x) => x.id === id);
+      if (m?.kind === "sticky") updateMark({ ...m, collapsed });
+    },
+  });
+}
+
+function refreshMarks(pages?: number[]): void {
+  if (!reader) return;
+  indexMarks();
+  const list = pages ?? [...Array(reader.viewer.pageCount).keys()];
+  list.forEach(drawMarks);
+  reader.panel.setData(highlights, settings.names, marks);
+  updatePanelCount();
+}
+
+function addMark(m: Mark): void {
+  marks = [...marks.filter((x) => x.id !== m.id), m];
+  refreshMarks([m.page]);
+  void db.putMark(m);
+}
+
+function updateMark(m: Mark): void {
+  const old = marks.find((x) => x.id === m.id);
+  marks = marks.map((x) => (x.id === m.id ? m : x));
+  refreshMarks([...new Set([m.page, old?.page ?? m.page])]);
+  void db.putMark(m);
+}
+
+function removeMark(id: string): void {
+  const m = marks.find((x) => x.id === id);
+  if (!m) return;
+  marks = marks.filter((x) => x.id !== id);
+  refreshMarks([m.page]);
+  void db.deleteMark(id);
+}
+
+/** Panelden silinen işaret: vurgu silme gibi 6 sn geri alınabilir. */
+function removeMarkWithUndo(id: string): void {
+  const m = marks.find((x) => x.id === id);
+  if (!m) return;
+  removeMark(id);
+  toast("İşaret silindi", { label: "Geri al", run: () => addMark(m) });
 }
 
 async function reloadHighlights(): Promise<void> {
@@ -314,11 +448,14 @@ async function reloadHighlights(): Promise<void> {
 function closeReader(): void {
   if (!reader) return;
   reader.editor?.destroy();
+  reader.write.disable();
   reader.viewer.destroy();
   reader.rail.destroy();
   void reader.file.doc.destroy();
   reader = null;
   highlights = [];
+  marks = [];
+  lastSelection = null;
   pending = null;
   activeId = null;
   deleted = [];
@@ -329,7 +466,10 @@ async function openReader(file: OpenDoc): Promise<void> {
   closeReader();
   home = null;
   highlights = await db.highlightsFor(file.rec.hash);
+  marks = await db.marksFor(file.rec.hash);
   indexHighlights();
+  indexMarks();
+  rightTab = "marks";
   railOpen = settings.railOpen && !isNarrow();
   panelOpen = settings.panelOpen && !isNarrow();
 
@@ -380,7 +520,11 @@ async function openReader(file: OpenDoc): Promise<void> {
     { label: "Sayfa sayfa", hint: "slaytlar", on: viewer.scrollMode === "paged", run: () => setScrollMode("paged") },
   ]));
   const themeBtn = ghost("Koyu tema", { class: "cm-btn cm-btn--ghost cm-btn--sm is-wide", onclick: () => void changeSettings({ ...settings, theme: resolvedTheme() === "dark" ? "light" : "dark" }) });
-  const panelBtn = ghost("İşaretler ", { title: "İşaretler paneli ( ] )", "aria-pressed": String(panelOpen), onclick: () => togglePanel() }, h("span", { class: "cm-num", text: num(highlights.length) }));
+  const panelBtn = ghost("İşaretler ", { title: "İşaretler paneli ( ] )", "aria-pressed": String(panelOpen), onclick: () => {
+    if (panelOpen && rightTab !== "marks") showRightTab("marks");
+    else togglePanel();
+  } }, h("span", { class: "cm-num", text: num(highlights.length) }));
+  const aiBtn = ghost("AI", { title: "AI paneli (Ctrl J)", "aria-pressed": "false", onclick: () => toggleAi() });
   const sep = () => h("span", { class: "cm-bar__sep" });
 
   const bar = h("header", { class: "cm-bar", role: "toolbar", "aria-label": "Okuyucu araç çubuğu" },
@@ -408,6 +552,7 @@ async function openReader(file: OpenDoc): Promise<void> {
       h("button", { class: "cm-btn cm-btn--sm", onclick: () => exportDialog() }, "Dışa aktar"),
       sep(),
       panelBtn,
+      aiBtn,
     ),
   );
 
@@ -421,17 +566,24 @@ async function openReader(file: OpenDoc): Promise<void> {
     note: () => noteFromFloat(),
     copy: () => copySelection(),
     remove: () => activeId && removeHighlight(activeId),
+    ask: () => askSelection(),
   });
 
   const viewer = new Viewer(stage, file.doc, {
     pageChange: (i) => onPageChange(i),
-    selection: (parts) => onSelection(parts),
+    selection: (parts) => {
+      if (reader?.mode === "write" && reader.write.tool !== "highlight") return;
+      onSelection(parts);
+    },
     selectionCleared: () => {
       pending = null;
       if (float.mode === "new" || float.mode === "applied") float.hide();
       activeId = null;
     },
-    highlightClick: (id) => onHighlightClick(id),
+    highlightClick: (id) => {
+      if (reader?.mode === "write" && reader.write.tool !== "highlight") return;
+      onHighlightClick(id);
+    },
     scroll: () => focusMode && flashPageFlag(),
     zoomChange: () => updateZoomLabel(),
   });
@@ -443,6 +595,18 @@ async function openReader(file: OpenDoc): Promise<void> {
     },
     saveNote: (id, note) => void saveNote(id, note),
     remove: (id) => removeHighlight(id),
+    jumpMark: (m) => {
+      viewer.reveal(m.page, markBox(m));
+      if (isNarrow()) togglePanel(false);
+    },
+    editMark: (m) => {
+      void setMode("write").then(() => {
+        reader?.write.setTool("select");
+        viewer.reveal(m.page, markBox(m));
+        setTimeout(() => reader?.write.edit(m.id), 280);
+      });
+    },
+    removeMark: (id) => removeMarkWithUndo(id),
     resize: (w) => {
       settings.panelWidth = w;
       reader?.body.style.setProperty("--panel-width", `${w}px`);
@@ -474,7 +638,34 @@ async function openReader(file: OpenDoc): Promise<void> {
   });
   stageWrap.append(search.el);
 
-  const body = h("div", { class: "cm-body" }, rail.el, stageWrap, panel.el);
+  const write = new WriteMode(viewer, file.rec.hash, settings.pen, {
+    marks: () => marks,
+    add: addMark,
+    update: updateMark,
+    remove: removeMark,
+    redraw: drawMarks,
+    pen: (color, width) => void changeSettings({ ...settings, pen: { color, width } }),
+    announce,
+  });
+  write.el.hidden = true;
+  stageWrap.append(write.el);
+
+  const ai = new AiPanel({
+    settings: () => settings.ai,
+    context: (scope) => aiContext(scope),
+    counts: () => ({ selection: !!lastSelection, hl2: highlights.filter((x) => x.color === 2).length, hl4: highlights.filter((x) => x.color === 4).length }),
+    citeHover: (c) => void showCite(c),
+    citeJump: (c) => void jumpCite(c),
+    addNote: (page, text) => addAiNote(page, text),
+    openSettings: aiSetup,
+  });
+  ai.el.hidden = true;
+  const tab = (id: "marks" | "ai", label: string) =>
+    h("button", { class: `cm-tab${id === "marks" ? " is-on" : ""}`, role: "tab", "data-tab": id, "aria-selected": String(id === "marks"), onclick: () => showRightTab(id) }, label);
+  const rtabs = h("div", { class: "cm-tabs cm-rtabs", role: "tablist", hidden: true }, tab("marks", "İşaretler"), tab("ai", "AI"));
+  const right = h("div", { class: "cm-right" }, rtabs, panel.el, ai.el);
+
+  const body = h("div", { class: "cm-body" }, rail.el, stageWrap, right);
   // Mobil: yüzen çubuk ve kalabalık üst bar yerine alta sabit gezinme.
   const moreBtn = h("button", { class: "cm-btn cm-btn--ghost", "aria-haspopup": "menu" }, "Diğer");
   moreBtn.addEventListener("click", () => fileMenu(moreBtn, true));
@@ -491,6 +682,7 @@ async function openReader(file: OpenDoc): Promise<void> {
   reader = {
     file, root, body, band, stage, viewer, panel, rail, float, search, pageInput, zoomLabel,
     panelBtn, railBtn, themeBtn, modeSeg, pageFlag, editor: null,
+    write, ai, aiBtn, rtabs, outline: [], mode: "read",
   };
   renderModeSeg("read");
   applySettings();
@@ -502,11 +694,16 @@ async function openReader(file: OpenDoc): Promise<void> {
   updateZoomLabel();
   onPageChange(viewer.current);
   refreshHighlights();
+  refreshMarks();
   rail.setBookmarks(file.rec.bookmarks);
   stage.focus({ preventScroll: true });
   if (file.rec.lastPage > 0) toast(`Kaldığın yerden: sayfa ${num(file.rec.lastPage + 1)}`);
 
-  void loadOutline(file.doc).then((o) => reader?.file === file && rail.setOutline(o)).catch(() => {});
+  void loadOutline(file.doc).then((o) => {
+    if (reader?.file !== file) return;
+    reader.outline = o;
+    rail.setOutline(o);
+  }).catch(() => {});
   if (!file.rec.scannedDismissed) {
     void looksScanned(file.doc).then((scanned) => scanned && reader?.file === file && showScannedBand());
   }
@@ -520,6 +717,7 @@ function onPageChange(i: number): void {
   if (document.activeElement !== reader.pageInput) reader.pageInput.value = String(i + 1);
   reader.rail.setCurrent(i);
   reader.panel.pageChanged(i);
+  if (rightTab === "ai" && aiOn()) reader.ai.pageChanged();
   reader.file.rec.lastPage = i;
   clearTimeout(lastPageSave);
   lastPageSave = window.setTimeout(() => reader && void db.putFile({ ...reader.file.rec, lastOpened: Date.now() }), 600);
@@ -620,35 +818,23 @@ function bindFocusPeek(root: HTMLElement): void {
 
 // ---------- Modlar ----------
 
-function renderModeSeg(mode: "read" | "edit"): void {
+function renderModeSeg(mode: Mode): void {
   if (!reader) return;
-  const btn = (m: "read" | "edit", label: string, key: string) =>
+  const btn = (m: Mode, label: string, key: string) =>
     h("button", { class: mode === m ? "is-on" : "", "aria-pressed": String(mode === m), title: `${label} (${key})`, onclick: () => void setMode(m) }, label);
-  // Yaz modu v1.1 ile gelir; o zamana kadar seçicide yer almaz.
-  reader.modeSeg.replaceChildren(btn("read", "Oku", "Alt 1"), btn("edit", "Düzenle", "Alt 3"));
+  reader.modeSeg.replaceChildren(btn("read", "Oku", "Alt 1"), btn("write", "Yaz", "Alt 2"), btn("edit", "Düzenle", "Alt 3"));
 }
 
-async function setMode(mode: "read" | "edit"): Promise<void> {
-  if (!reader) return;
+/** Mod değişince yalnızca araçlar değişir; sayfa, zoom ve konum aynı kalır. */
+async function setMode(mode: Mode): Promise<void> {
+  if (!reader || reader.mode === mode) return;
   const r = reader;
-  if (mode === "edit" && !r.editor) {
-    hideFloat();
-    r.search.el.hidden = true;
-    const editor = new PageEditor(
-      { id: "main", name: r.file.rec.name, bytes: r.file.bytes, doc: r.file.doc },
-      { saved: (out, name, pages) => void onEditorSaved(out, name, pages), askPassword: (n, w) => askPassword(n, w) },
-    );
-    r.editor = editor;
-    r.body.hidden = true;
-    r.root.classList.add("is-edit");
-    r.root.insertBefore(editor.el, r.body.nextSibling);
-    renderModeSeg("edit");
-    editor.focus();
-  } else if (mode === "read" && r.editor) {
+  // Düzenle modundan çıkış: kaydedilmemiş değişiklik varsa sor.
+  if (r.editor) {
     if (r.editor.changes) {
       const ok = await confirmDialog({
         title: "Kaydedilmemiş değişiklikler var",
-        text: `${num(r.editor.changes)} sayfa değişikliği kaydedilmedi. Okuma moduna dönersen kaybolur.`,
+        text: `${num(r.editor.changes)} sayfa değişikliği kaydedilmedi. Düzenle modundan çıkarsan kaybolur.`,
         ok: "Kaydetmeden çık",
         danger: true,
       });
@@ -659,10 +845,40 @@ async function setMode(mode: "read" | "edit"): Promise<void> {
     r.editor = null;
     r.body.hidden = false;
     r.root.classList.remove("is-edit");
-    renderModeSeg("read");
     r.viewer.scheduleRender(0);
-    r.stage.focus({ preventScroll: true });
   }
+  if (r.mode === "write") {
+    r.write.disable();
+    r.write.el.hidden = true;
+    r.root.classList.remove("is-write");
+  }
+  r.mode = mode;
+  renderModeSeg(mode);
+  hideFloat();
+  if (mode === "edit") {
+    r.search.el.hidden = true;
+    const editor = new PageEditor(
+      { id: "main", name: r.file.rec.name, bytes: r.file.bytes, doc: r.file.doc },
+      { saved: (out, name, pages) => void onEditorSaved(out, name, pages), askPassword: (n, w) => askPassword(n, w) },
+    );
+    r.editor = editor;
+    r.body.hidden = true;
+    r.root.classList.add("is-edit");
+    r.root.insertBefore(editor.el, r.body.nextSibling);
+    editor.focus();
+    return;
+  }
+  if (mode === "write") {
+    if (focusMode) setFocus(false);
+    window.getSelection()?.removeAllRanges();
+    r.root.classList.add("is-write");
+    r.write.el.hidden = false;
+    r.write.enable();
+    announce("Yaz modu");
+  } else {
+    announce("Oku modu");
+  }
+  r.stage.focus({ preventScroll: true });
 }
 
 /** Düzenle modunda kaydedilen kopya: vurgular ve yer imleri sayfalarıyla birlikte yeni dosyaya taşınır. */
@@ -670,15 +886,20 @@ async function onEditorSaved(out: Uint8Array, name: string, pages: EditPage[]): 
   if (!reader) return;
   const hash = await sha256(out.slice().buffer as ArrayBuffer);
   const moved: Highlight[] = [];
+  const movedMarks: Mark[] = [];
   const bookmarks: number[] = [];
   pages.forEach((p, newIndex) => {
     if (p.src !== "main") return;
     for (const hl of byPage.get(p.index) ?? []) {
       moved.push({ ...hl, id: uid(), fileHash: hash, page: newIndex, rects: hl.rects.map((r) => rotateRect(r, p.rotation)), updatedAt: Date.now() });
     }
+    for (const m of marksByPage.get(p.index) ?? []) {
+      movedMarks.push({ ...rotateMark(m, p.rotation), id: uid(), fileHash: hash, page: newIndex, updatedAt: Date.now() });
+    }
     if (reader!.file.rec.bookmarks.includes(p.index)) bookmarks.push(newIndex);
   });
   await db.putHighlights(moved);
+  await db.putMarks(movedMarks);
   await db.putFile({ hash, name, size: out.byteLength, pageCount: pages.length, lastPage: 0, lastOpened: Date.now() - 1, bookmarks });
   download(name, out, "application/pdf");
   toast(`Kopya kaydedildi: ${name}${moved.length ? ` · ${num(moved.length)} vurgu taşındı` : ""}`, {
@@ -701,8 +922,10 @@ async function goHome(): Promise<void> {
 function onSelection(parts: SelectionPart[]): void {
   if (!reader) return;
   pending = parts;
+  lastSelection = parts;
   activeId = null;
   showFloatFor(parts[0].page, parts[0].rects, "new");
+  if (rightTab === "ai" && aiOn()) reader.ai.selectionChanged();
 }
 
 function showFloatFor(page: number, rects: Highlight["rects"], mode: "new" | "applied", color?: Color): void {
@@ -715,7 +938,7 @@ function showFloatFor(page: number, rects: Highlight["rects"], mode: "new" | "ap
   const right = Math.max(...rects.map((r) => { const x = reader!.viewer.rectPx(page, r); return x.left + x.width; }));
   reader.float.show(
     { pageEl, top: first.top, bottom: last.top + last.height, left, right },
-    mode, settings.names, color, reader.stage.getBoundingClientRect().top,
+    mode, settings.names, color, reader.stage.getBoundingClientRect().top, aiOn(),
   );
 }
 
@@ -840,11 +1063,129 @@ function toggleBookmark(): void {
 
 function exportDialog(): void {
   if (!reader) return;
-  if (!highlights.length) {
-    toast("Dışa aktaracak vurgu yok. Önce sayfada metni seçip vurgula.");
+  if (!highlights.length && !marks.some((m) => (m.kind === "text" || m.kind === "sticky") && m.text.trim())) {
+    toast("Dışa aktaracak vurgu ya da not yok. Önce sayfada metni seçip vurgula.");
     return;
   }
-  openExport({ title: reader.file.title, fileName: reader.file.rec.name, highlights, names: settings.names });
+  openExport({ title: reader.file.title, fileName: reader.file.rec.name, highlights, marks, names: settings.names });
+}
+
+// ---------- AI ----------
+
+const MAX_PAGES = 40;
+const MAX_CHARS = 150_000;
+
+/** Seçim araç çubuğundaki Sor: seçili metni kapsam yaparak AI panelini açar. */
+function askSelection(): void {
+  if (!reader || !aiOn()) return;
+  if (pending) lastSelection = pending;
+  hideFloat();
+  if (!panelOpen) togglePanel(true);
+  if (focusMode) setFocus(false);
+  showRightTab("ai");
+  reader.ai.askAboutSelection();
+}
+
+/** Okunan sayfanın içinde bulunduğu bölüm: içindekiler ağacında bir sonraki başlığa kadar. */
+function sectionRange(outline: OutlineItem[], page: number): [number, number] | null {
+  const flat: number[] = [];
+  const walk = (items: OutlineItem[]) => items.forEach((it) => (it.page !== null && flat.push(it.page), walk(it.children)));
+  walk(outline);
+  const starts = [...new Set(flat)].sort((a, b) => a - b);
+  const start = starts.filter((p) => p <= page).at(-1);
+  if (start === undefined) return null;
+  const next = starts.find((p) => p > start);
+  return [start, (next ?? reader!.viewer.pageCount) - 1];
+}
+
+/** Kapsamın metni. Dosyanın tamamı asla kendiliğinden gönderilmez; uzun kapsam kırpılmaz, söylenir. */
+async function aiContext(scope: Scope): Promise<AiContext | { error: string }> {
+  if (!reader) return { error: "Açık dosya yok." };
+  const { doc } = reader.file;
+  const cur = reader.viewer.current;
+  const hlPages = (list: Highlight[], label: string): AiContext | { error: string } => {
+    if (!list.length) return { error: "Bu kapsamda vurgu yok." };
+    const pages = new Map<number, string[]>();
+    for (const x of [...list].sort(readingOrder)) {
+      const line = `- [${settings.names[x.color]}] ${x.text}${x.note.trim() ? ` (Notum: ${x.note.trim()})` : ""}`;
+      pages.set(x.page, [...(pages.get(x.page) ?? []), line]);
+    }
+    return { label, pages: [...pages].map(([page, lines]) => ({ page, text: lines.join("\n") })) };
+  };
+  switch (scope) {
+    case "selection": {
+      if (!lastSelection?.length) return { error: "Önce sayfada metin seç, sonra Sor'a bas ya da A." };
+      const pages = lastSelection.map((p) => ({ page: p.page, text: p.text }));
+      return { label: `seçim (s. ${pages.map((p) => p.page + 1).join(", ")})`, pages };
+    }
+    case "page": {
+      const text = await pageText(doc, cur);
+      if (!text.trim()) return { error: "Bu sayfada seçilebilir metin yok (taranmış olabilir). AI bu sayfayı okuyamaz." };
+      return { label: `sayfa ${num(cur + 1)} metni`, pages: [{ page: cur, text }] };
+    }
+    case "section": {
+      const range = sectionRange(reader.outline, cur);
+      if (!range) return { error: "Bu PDF'in içindekiler bilgisi yok; bölüm bulunamadı. Bu sayfa ya da Seçim kapsamını kullan." };
+      const [a, b] = range;
+      if (b - a + 1 > MAX_PAGES) return { error: `Bu bölüm ${num(b - a + 1)} sayfa; en fazla ${MAX_PAGES} sayfa gönderilebilir. Bu sayfa ya da Seçim kapsamını kullan.` };
+      const pages: AiContext["pages"] = [];
+      let chars = 0;
+      for (let i = a; i <= b; i++) {
+        const text = await pageText(doc, i);
+        chars += text.length;
+        if (chars > MAX_CHARS) return { error: `Bu bölüm çok uzun (${num(chars)}+ karakter). Bu sayfa ya da Seçim kapsamını kullan.` };
+        if (text.trim()) pages.push({ page: i, text });
+      }
+      if (!pages.length) return { error: "Bu bölümde seçilebilir metin yok." };
+      return { label: `bölüm, s. ${num(a + 1)}–${num(b + 1)}`, pages };
+    }
+    case "highlights":
+      return hlPages(highlights, `${num(highlights.length)} vurgu`);
+    case "hl2": {
+      const list = highlights.filter((x) => x.color === 2);
+      return hlPages(list, `${num(list.length)} "${settings.names[2]}" vurgusu`);
+    }
+    case "hl4": {
+      const list = highlights.filter((x) => x.color === 4);
+      return hlPages(list, `${num(list.length)} "${settings.names[4]}" vurgusu`);
+    }
+  }
+}
+
+/** Kaynak etiketinin üstüne gelince sayfadaki dayanak metin noktalı alt çizgiyle gösterilir. */
+async function showCite(c: Cite | null): Promise<void> {
+  if (!reader) return;
+  if (!c || !c.quote) {
+    reader.viewer.showSearchHit(null, []);
+    return;
+  }
+  if (c.page < 0 || c.page >= reader.viewer.pageCount) return;
+  const rects = await reader.viewer.findRects(c.page, c.quote, 0);
+  reader.viewer.showSearchHit(rects.length ? c.page : null, rects, "cite");
+}
+
+/** Kaynak etiketine tıklamak, panelden vurguya atlamayla aynı davranır. */
+async function jumpCite(c: Cite): Promise<void> {
+  if (!reader || c.page < 0 || c.page >= reader.viewer.pageCount) return;
+  const rects = c.quote ? await reader.viewer.findRects(c.page, c.quote, 0) : [];
+  reader.viewer.reveal(c.page, rects[0]);
+  if (rects.length) {
+    reader.viewer.showSearchHit(c.page, rects, "cite");
+    setTimeout(() => reader?.viewer.showSearchHit(null, []), 1800);
+  } else if (c.quote) {
+    toast(`Alıntı sayfa ${num(c.page + 1)}'de birebir bulunamadı; kaynağı kendin kontrol et.`, undefined, 4000);
+  }
+}
+
+/** AI cevabı yalnızca açık bir tıkla, "AI" etiketli yapışkan not olarak eklenir. */
+function addAiNote(page: number, text: string): void {
+  if (!reader) return;
+  page = Math.min(Math.max(0, page), reader.viewer.pageCount - 1);
+  const existing = (marksByPage.get(page) ?? []).filter((m) => m.kind === "sticky" && m.ai).length;
+  const now = Date.now();
+  const m: Mark = { id: uid(), fileHash: reader.file.rec.hash, page, kind: "sticky", ai: true, box: [0.7, Math.min(0.85, 0.06 + existing * 0.12), 0.27, 0.1], text, createdAt: now, updatedAt: now };
+  addMark(m);
+  toast(`AI notu sayfa ${num(page + 1)}'ye eklendi`, { label: "Geri al", run: () => removeMark(m.id) });
 }
 
 // ---------- Klavye ----------
@@ -861,13 +1202,26 @@ document.addEventListener("keydown", (e) => {
   if (!reader) return;
   const r = reader;
 
-  if (e.altKey && !ctrl && (e.code === "Digit1" || e.code === "Digit3")) {
+  if (e.altKey && !ctrl && /^Digit[123]$/.test(e.code)) {
     e.preventDefault();
-    void setMode(e.code === "Digit1" ? "read" : "edit");
+    void setMode((["read", "write", "edit"] as const)[Number(e.code.slice(5)) - 1]);
     return;
   }
   if (r.editor) {
     if (r.editor.handleKey(e)) e.preventDefault();
+    return;
+  }
+  if (r.mode === "write" && !(r.write.tool === "highlight" && (pending || r.float.mode))) {
+    if (r.write.handleKey(e)) return e.preventDefault();
+    if (e.key === "Escape" && !isTyping(e)) {
+      if (r.write.selectedId) r.write.setTool(r.write.tool);
+      else void setMode("read"); // Esc Oku moduna döner; son araç hatırlanır
+      return e.preventDefault();
+    }
+  }
+  if (ctrl && key === "j") {
+    e.preventDefault();
+    toggleAi();
     return;
   }
   if (ctrl) {
@@ -876,7 +1230,6 @@ document.addEventListener("keydown", (e) => {
     else if (key === "-") (e.preventDefault(), r.viewer.zoomBy(1 / 1.1));
     else if (key === "0") (e.preventDefault(), r.viewer.setZoom("width"));
     else if (key === "z" && !isTyping(e) && deleted.length) (e.preventDefault(), void undoDelete());
-    else if (key === "j") (e.preventDefault(), togglePanel(true), r.panel.focusList());
     return;
   }
   if (isTyping(e) || e.altKey) return;
@@ -885,6 +1238,7 @@ document.addEventListener("keydown", (e) => {
   if (selecting && /^[1-4]$/.test(e.key)) return e.preventDefault(), void applyColor(Number(e.key) as Color);
   if (selecting && key === "n") return e.preventDefault(), void noteFromFloat();
   if (selecting && key === "c") return e.preventDefault(), copySelection();
+  if (selecting && key === "a" && aiOn()) return e.preventDefault(), askSelection();
   if (r.float.mode === "applied" && (e.key === "Delete" || e.key === "Backspace") && activeId) return e.preventDefault(), removeHighlight(activeId);
   if (selecting && e.key === "Tab" && r.float.open && !r.float.el.contains(document.activeElement)) return e.preventDefault(), r.float.focus();
 
