@@ -4,6 +4,8 @@
 
 > Dosyan bilgisayarından çıkmaz; açma, okuma ve vurgular tamamen bu tarayıcıda işlenir.
 
+**Canlı:** https://calisma-masasi-cyan.vercel.app — `main` branch'ine her push Vercel'de otomatik yayınlanır; diğer branch'ler önizleme adresi alır.
+
 Tasarım kararları, renk/şekil sözleşmesi, etkileşim kuralları ve riskler [`docs/`](docs/) altında; tasarım token'larının tek kaynağı [`design/tokens.json`](design/tokens.json).
 
 ## Çalıştırma
