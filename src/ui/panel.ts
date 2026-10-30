@@ -212,7 +212,9 @@ export class Panel {
   }
 
   private rows(): Row[] {
-    const hl: Row[] = this.visible().map((it) => ({ type: "hl", it, page: it.page, y: it.rects[0]?.[1] ?? 0, x: it.rects[0]?.[0] ?? 0, created: it.createdAt }));
+    // Sayfalar arası vurgunun yalnızca ilk parçası satır olur.
+    const seen = new Set<string>();
+    const hl: Row[] = this.visible().filter((it) => !it.group || (!seen.has(it.group) && !!seen.add(it.group)) ).map((it) => ({ type: "hl", it, page: it.page, y: it.rects[0]?.[1] ?? 0, x: it.rects[0]?.[0] ?? 0, created: it.createdAt }));
     const all = [...hl, ...this.markRows()];
     if (this.sort === "time") return all.sort((a, b) => b.created - a.created);
     if (this.sort === "color") {
@@ -377,7 +379,10 @@ export class Panel {
 
   private itemRow(it: Highlight): HTMLElement {
     const name = this.names[it.color];
-    const quote = h("div", { class: "cm-item__quote" }, h("mark", { text: it.text }));
+    // Sayfalar arası vurgu: parçaların metni tek alıntı, sayfa aralığı "s. 3–4".
+    const parts = it.group ? this.items.filter((x) => x.group === it.group).sort((a, b) => a.page - b.page) : [it];
+    const pageLabel = parts.length > 1 ? `s. ${num(parts[0].page + 1)}–${num(parts[parts.length - 1].page + 1)}` : `s. ${num(it.page + 1)}`;
+    const quote = h("div", { class: "cm-item__quote" }, h("mark", { text: parts.map((p) => p.text).join(" ") }));
     (quote.firstChild as HTMLElement).style.setProperty("--hl", `var(--hl-${it.color})`);
     const body = h("div", {}, quote);
     const editing = this.editingId === it.id;
@@ -415,7 +420,7 @@ export class Panel {
       body.append(box, h("div", { class: "cm-item__meta" }, h("span", {}, kbd("Ctrl Enter"), " kapat"), h("span", { text: "Otomatik kaydedilir" })));
     } else {
       if (it.note.trim()) body.append(h("div", { class: "cm-item__note", text: it.note }));
-      const meta = h("div", { class: "cm-item__meta" }, h("span", {}, h("span", { class: "cm-num", text: `s. ${num(it.page + 1)}` }), ` · ${name}`));
+      const meta = h("div", { class: "cm-item__meta" }, h("span", {}, h("span", { class: "cm-num", text: pageLabel }), ` · ${name}`));
       meta.append(
         h("button", {
           class: "cm-item__add",

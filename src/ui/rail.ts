@@ -1,7 +1,8 @@
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { num } from "../format";
 import type { OutlineItem } from "../pdf/load";
-import type { Color } from "../types";
+import type { Color, Mark } from "../types";
+import { drawingsSvg } from "../write/layer";
 import { h, marker } from "../util";
 
 export interface RailActions {
@@ -120,6 +121,19 @@ export class Rail {
       if (colors?.size) {
         holder.append(h("span", { class: "cm-thumb__dots" }, ...[...colors].sort().map((c) => marker(c))));
       }
+    });
+  }
+
+  /** Yaz modu çizimleri küçük sayfa önizlemesinde de görünür. */
+  setDrawings(byPage: Map<number, Mark[]>): void {
+    this.buttons.forEach((b, i) => {
+      const holder = b.querySelector<HTMLElement>(".cm-thumb__page")!;
+      holder.querySelector(":scope > .cm-ink")?.remove();
+      const list = (byPage.get(i) ?? []).filter((m) => m.kind === "ink" || m.kind === "shape");
+      if (!list.length) return;
+      const w = 600;
+      const hgt = w * ((holder.clientHeight || 100) / (holder.clientWidth || 72));
+      holder.append(drawingsSvg(list, w, hgt));
     });
   }
 

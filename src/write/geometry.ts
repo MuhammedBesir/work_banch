@@ -20,7 +20,12 @@ export function smoothPath(points: Pt[]): string {
 
 /** Ramer–Douglas–Peucker: el yazısını gözle görülür fark olmadan seyreltir. */
 export function simplify(points: Pt[], tolerance = 0.0008): Pt[] {
-  if (points.length < 3) return points;
+  return simplifyIndices(points, tolerance).map((i) => points[i]);
+}
+
+/** Seyreltmede tutulan noktaların sırası (basınç dizisi de aynı noktalarla seyrelsin diye). */
+export function simplifyIndices(points: Pt[], tolerance = 0.0008): number[] {
+  if (points.length < 3) return points.map((_, i) => i);
   const sq = tolerance * tolerance;
   const keep = new Uint8Array(points.length);
   keep[0] = keep[points.length - 1] = 1;
@@ -38,7 +43,47 @@ export function simplify(points: Pt[], tolerance = 0.0008): Pt[] {
       stack.push([a, idx], [idx, b]);
     }
   }
-  return points.filter((_, i) => keep[i]);
+  return points.map((_, i) => i).filter((i) => keep[i]);
+}
+
+/**
+ * Basınca duyarlı çizgi: noktalar boyunca kalınlığı değişen dolu bir şekil (0–1 koordinat).
+ * `widthPx` ölçek 1'deki kalınlık; `w`, `h` sayfanın ölçek 1'deki boyutu.
+ */
+export function strokeOutline(points: Pt[], pressures: number[], widthPx: number, w: number, h: number): string {
+  if (points.length < 2) return "";
+  const px = points.map(([x, y]) => [x * w, y * h] as Pt);
+  const half = (i: number) => (widthPx * (0.35 + 1.3 * (pressures[i] ?? 0.5))) / 2;
+  const left: Pt[] = [];
+  const right: Pt[] = [];
+  for (let i = 0; i < px.length; i++) {
+    const a = px[Math.max(0, i - 1)];
+    const b = px[Math.min(px.length - 1, i + 1)];
+    let nx = -(b[1] - a[1]);
+    let ny = b[0] - a[0];
+    const len = Math.hypot(nx, ny) || 1;
+    nx /= len;
+    ny /= len;
+    const r = half(i);
+    left.push([(px[i][0] + nx * r) / w, (px[i][1] + ny * r) / h]);
+    right.push([(px[i][0] - nx * r) / w, (px[i][1] - ny * r) / h]);
+  }
+  const f = (n: number) => +n.toFixed(5);
+  const ring = [...left, ...right.reverse()];
+  return `M${ring.map(([x, y]) => `${f(x)} ${f(y)}`).join(" L")} Z`;
+}
+
+/** Shift: şekil kare/daire olur, ok ve çizgi 45°'lik açılara oturur (piksel uzayında). */
+export function constrain(from: Pt, to: Pt, kind: "rect" | "ellipse" | "arrow", w: number, h: number): Pt {
+  const dx = (to[0] - from[0]) * w;
+  const dy = (to[1] - from[1]) * h;
+  if (kind === "arrow") {
+    const ang = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
+    const len = Math.hypot(dx, dy);
+    return [from[0] + (Math.cos(ang) * len) / w, from[1] + (Math.sin(ang) * len) / h];
+  }
+  const side = Math.max(Math.abs(dx), Math.abs(dy));
+  return [from[0] + (Math.sign(dx || 1) * side) / w, from[1] + (Math.sign(dy || 1) * side) / h];
 }
 
 /** Noktanın doğru parçasına uzaklığının karesi. */

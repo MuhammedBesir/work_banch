@@ -114,6 +114,7 @@ export class Home {
     for (const row of rows) {
       const { rec } = row;
       const name = h("td", {}, h("div", { style: "font-weight:500;overflow-wrap:anywhere", text: rec.name }));
+      if (rec.aliases?.length) name.append(h("div", { class: "cm-muted cm-recent__lost", text: `Diğer adları: ${rec.aliases.join(", ")}` }));
       if (!row.reachable) {
         name.append(h("div", { class: "cm-muted cm-recent__lost", text: "Tarayıcı bu dosyaya erişimi bıraktı. Aynı dosyayı seçince vurgular geri gelir." }));
       }

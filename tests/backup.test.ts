@@ -9,9 +9,10 @@ describe("yedek", () => {
     await db.putHighlight({ id: "x", fileHash: "h1", page: 0, color: 2, rects: [[0, 0, 1, 1]], text: "t", note: "n", createdAt: 1, updatedAt: 1 });
     await db.putMark({ id: "m", fileHash: "h1", page: 0, kind: "text", color: "blue", box: [0.1, 0.1, 0.3, 0.05], text: "Z = standartlaştırma", createdAt: 1, updatedAt: 1 });
     const s = await db.loadSettings();
-    await db.saveSettings({ ...s, ai: { ...s.ai, mode: "cloud", apiKey: "sk-ant-gizli" } });
+    await db.saveSettings({ ...s, ai: { ...s.ai, mode: "anthropic", keys: { anthropic: "sk-ant-gizli", openai: "sk-gizli2" } } });
     const b = parseBackup(JSON.stringify(await createBackup()));
-    expect(JSON.stringify(b)).not.toContain("sk-ant-gizli"); // anahtar yedeğe girmez
+    expect(JSON.stringify(b)).not.toContain("sk-ant-gizli"); // anahtarlar yedeğe girmez
+    expect(JSON.stringify(b)).not.toContain("sk-gizli2");
     expect(b.highlights).toHaveLength(1);
 
     await db.clearAll();
@@ -22,7 +23,7 @@ describe("yedek", () => {
     expect((await db.marksFor("h1"))[0]).toMatchObject({ kind: "text", text: "Z = standartlaştırma" });
     expect((await db.highlightsFor("h1"))[0].note).toBe("n");
     expect((await db.getFile("h1"))?.bookmarks).toEqual([1]);
-    expect((await db.loadSettings()).ai.mode).toBe("cloud");
+    expect((await db.loadSettings()).ai.mode).toBe("anthropic");
   });
 
   it("yabancı dosyayı açık bir mesajla reddeder", () => {

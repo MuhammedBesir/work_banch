@@ -20,7 +20,7 @@ export async function createBackup(): Promise<Backup> {
     app: "calisma-masasi",
     version: 1,
     createdAt: new Date().toISOString(),
-    settings: { ...settings, ai: { ...settings.ai, apiKey: "" } },
+    settings: { ...settings, ai: { ...settings.ai, keys: { anthropic: "", openai: "" } } },
     files: files.map(({ handle: _h, ...rest }) => rest),
     highlights,
     marks,
@@ -52,7 +52,7 @@ export async function restoreBackup(b: Backup): Promise<{ highlights: number; fi
   if (b.settings) {
     // Yedekte anahtar yok: bu tarayıcıdaki anahtar korunur.
     const current = await db.loadSettings();
-    await db.saveSettings({ ...b.settings, ai: { ...current.ai, ...b.settings.ai, apiKey: current.ai.apiKey } });
+    await db.saveSettings({ ...b.settings, ai: { ...current.ai, ...b.settings.ai, keys: current.ai.keys } });
   }
   return { highlights: b.highlights.length, files: b.files.length, marks: b.marks?.length ?? 0 };
 }

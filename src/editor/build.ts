@@ -4,6 +4,8 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 export interface Source {
   id: string;
   name: string;
+  /** İçerik özeti: birleştirilen PDF'in vurguları yeni kopyaya taşınabilsin diye. */
+  hash?: string;
   bytes: Uint8Array;
   doc: PDFDocumentProxy;
 }

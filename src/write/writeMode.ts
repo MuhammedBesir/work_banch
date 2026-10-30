@@ -2,7 +2,7 @@ import type { Viewer } from "../pdf/viewer";
 import type { Mark, PenColor, ShapeKind } from "../types";
 import { PEN_COLORS } from "../types";
 import { h, isTyping, kbd, uid } from "../util";
-import { hitMark, moveMark, simplify } from "./geometry";
+import { constrain, hitMark, moveMark, simplifyIndices } from "./geometry";
 import { PEN_LABEL } from "./layer";
 
 export type Tool = "select" | "highlight" | "pen" | "text" | "sticky" | "shape" | "eraser";
@@ -44,7 +44,8 @@ export class WriteMode {
   shape: ShapeKind = "rect";
   color: PenColor;
   width: number;
-  selectedId: string | null = null;
+  /** Seçili işaretler (`Shift` + tıklama ile çoklu seçim). */
+  readonly selected = new Set<string>();
   editingId: string | null = null;
   private undoStack: Op[][] = [];
   private redoStack: Op[][] = [];
@@ -61,6 +62,10 @@ export class WriteMode {
     this.el = h("div", { class: "cm-palette", role: "toolbar", "aria-label": "Yazma araçları", "aria-orientation": "vertical" });
     this.el.addEventListener("pointerdown", (e) => e.stopPropagation());
     this.renderPalette();
+  }
+
+  get selectedId(): string | null {
+    return this.selected.values().next().value ?? null;
   }
 
   get isActive(): boolean {
@@ -82,7 +87,7 @@ export class WriteMode {
   disable(): void {
     this.finishEditing();
     this.active = false;
-    this.selectedId = null;
+    this.selected.clear();
     this.viewer.root.removeEventListener("pointerdown", this.onDown);
     this.viewer.root.removeEventListener("dblclick", this.onDblClick);
     this.viewer.root.classList.remove("is-writing", "is-tool-pen", "is-tool-shape", "is-tool-eraser", "is-tool-text", "is-tool-sticky", "is-tool-select", "is-tool-highlight");
@@ -109,7 +114,7 @@ export class WriteMode {
     this.color = c;
     this.actions.pen(this.color, this.width);
     this.renderPalette();
-    if (this.selectedId) this.recolorSelected(c);
+    if (this.selected.size) this.recolorSelected(c);
   }
 
   private setWidth(w: number): void {
@@ -185,13 +190,11 @@ export class WriteMode {
     if (ctrl && e.key.toLowerCase() === "y") return this.redo(), true;
     if (ctrl || e.altKey || isTyping(e)) return false;
     if (e.shiftKey && /^Digit[1-3]$/.test(e.code)) return this.setColor(PEN_COLORS[Number(e.code.slice(5)) - 1]), true;
-    if ((e.key === "Delete" || e.key === "Backspace") && this.selectedId) {
-      const m = this.find(this.selectedId);
-      if (m) {
-        this.actions.remove(m.id);
-        this.record([{ remove: m }]);
-        this.selectedId = null;
-      }
+    if ((e.key === "Delete" || e.key === "Backspace") && this.selected.size) {
+      const list = [...this.selected].map((id) => this.find(id)).filter((m): m is Mark => !!m);
+      this.selected.clear();
+      list.forEach((m) => this.actions.remove(m.id));
+      this.record(list.map((m) => ({ remove: m })));
       return true;
     }
     const t = TOOLS.find((x) => x[2].toLowerCase() === e.key.toLowerCase());
@@ -205,20 +208,29 @@ export class WriteMode {
     return this.actions.marks().find((m) => m.id === id);
   }
 
-  private select(id: string | null): void {
-    const prev = this.selectedId ? this.find(this.selectedId) : undefined;
-    this.selectedId = id;
-    if (prev) this.actions.redraw(prev.page);
-    const cur = id ? this.find(id) : undefined;
-    if (cur && cur.page !== prev?.page) this.actions.redraw(cur.page);
+  /** `additive`: Shift + tıklama seçime ekler / çıkarır. */
+  private select(id: string | null, additive = false): void {
+    const pages = new Set([...this.selected].map((x) => this.find(x)?.page).filter((p): p is number => p !== undefined));
+    if (!additive) this.selected.clear();
+    if (id) {
+      if (additive && this.selected.has(id)) this.selected.delete(id);
+      else this.selected.add(id);
+      const cur = this.find(id);
+      if (cur) pages.add(cur.page);
+    }
+    pages.forEach((p) => this.actions.redraw(p));
   }
 
   private recolorSelected(c: PenColor): void {
-    const m = this.find(this.selectedId!);
-    if (!m || m.kind === "sticky") return;
-    const after = { ...m, color: c, updatedAt: Date.now() } as Mark;
-    this.actions.update(after);
-    this.record([{ before: m, after }]);
+    const ops: Op[] = [];
+    for (const id of this.selected) {
+      const m = this.find(id);
+      if (!m || m.kind === "sticky") continue;
+      const after = { ...m, color: c, updatedAt: Date.now() } as Mark;
+      this.actions.update(after);
+      ops.push({ before: m, after });
+    }
+    this.record(ops);
   }
 
   // ---------- İşaretçi ----------
@@ -235,6 +247,7 @@ export class WriteMode {
     const target = e.target as HTMLElement;
     if (target.closest(".cm-floatwrap, .cm-sticky__toggle")) return;
     if (this.editingId && target.closest("[contenteditable]")) return;
+    if (target.dataset.handle) return this.resizeText(e, target.dataset.handle);
     // Avuç reddi: parmak yalnızca kaydırır.
     if (e.pointerType === "touch") return this.fingerScroll(e);
     const at = this.pageAt(e);
@@ -288,7 +301,7 @@ export class WriteMode {
     return { svg: svgEl, done: () => svgEl.remove() };
   }
 
-  private track(e: PointerEvent, el: HTMLElement, onMove: (pts: [number, number, number][]) => void, onUp: () => void): void {
+  private track(e: PointerEvent, el: HTMLElement, onMove: (pts: [number, number, number][], ev: PointerEvent) => void, onUp: () => void): void {
     el.setPointerCapture?.(e.pointerId);
     const box = el.getBoundingClientRect();
     const norm = (ev: PointerEvent): [number, number, number] => [
@@ -296,11 +309,11 @@ export class WriteMode {
       Math.min(1, Math.max(0, (ev.clientY - box.top) / box.height)),
       ev.pointerType === "pen" ? ev.pressure : 0.5,
     ];
-    onMove([norm(e)]);
+    onMove([norm(e)], e);
     const move = (ev: PointerEvent) => {
       if (ev.pointerId !== e.pointerId) return;
       const list = ev.getCoalescedEvents?.() ?? [ev];
-      onMove((list.length ? list : [ev]).map(norm));
+      onMove((list.length ? list : [ev]).map(norm), ev);
     };
     const up = (ev: PointerEvent) => {
       if (ev.pointerId !== e.pointerId) return;
@@ -321,22 +334,26 @@ export class WriteMode {
     path.setAttribute("style", `stroke-width:calc(${this.width}px * var(--z, 1))`);
     live.svg.append(path);
     const pts: [number, number][] = [];
-    let pressure = 0;
+    const pressures: number[] = [];
     let d = "";
     this.track(e, at.el, (list) => {
       for (const [x, y, p] of list) {
         d += `${pts.length ? " L" : "M"}${x.toFixed(5)} ${y.toFixed(5)}`;
         pts.push([x, y]);
-        pressure += p;
+        pressures.push(+p.toFixed(2));
       }
       path.setAttribute("d", d);
     }, () => {
       live.done();
       if (!pts.length) return;
-      // Kalem basıncı: ortalama basınç çizgi kalınlığını 0,6×–1,4× arasında ölçekler.
-      const avg = pressure / pts.length;
-      const width = e.pointerType === "pen" ? +(this.width * (0.6 + 0.8 * avg)).toFixed(2) : this.width;
-      const m: Mark = { id: uid(), fileHash: this.fileHash, page: at.page, kind: "ink", color: this.color, width, points: simplify(pts), createdAt: Date.now(), updatedAt: Date.now() };
+      // Kalemle (stylus) çizildiyse her noktanın basıncı saklanır: çizgi boyunca kalınlık değişir.
+      const keep = simplifyIndices(pts);
+      const m: Mark = {
+        id: uid(), fileHash: this.fileHash, page: at.page, kind: "ink", color: this.color, width: this.width,
+        points: keep.map((i) => pts[i]),
+        ...(e.pointerType === "pen" ? { pressures: keep.map((i) => pressures[i]) } : {}),
+        createdAt: Date.now(), updatedAt: Date.now(),
+      };
       this.actions.add(m);
       this.record([{ add: m }]);
     });
@@ -350,10 +367,12 @@ export class WriteMode {
     live.svg.append(path);
     let from: [number, number] | null = null;
     let to: [number, number] = [0, 0];
-    this.track(e, at.el, (list) => {
-      const [x, y] = list[list.length - 1];
-      from ??= [x, y];
-      to = [x, y];
+    this.track(e, at.el, (list, ev) => {
+      const [px, py] = list[list.length - 1];
+      from ??= [px, py];
+      // Shift: kare / daire, ok 45°'lik açılara oturur.
+      to = ev.shiftKey ? constrain(from, [px, py], this.shape, at.w, at.h) : [px, py];
+      const [x, y] = to;
       const [x0, y0] = from;
       path.setAttribute("d", this.shape === "rect"
         ? `M${x0} ${y0} H${x} V${y} H${x0} Z`
@@ -387,12 +406,17 @@ export class WriteMode {
 
   private pick(e: PointerEvent, at: NonNullable<ReturnType<WriteMode["pageAt"]>>): void {
     const hit = [...this.actions.marks()].reverse().find((m) => m.page === at.page && hitMark(m, at.x, at.y, at.w, at.h));
-    this.select(hit?.id ?? null);
+    if (e.shiftKey) {
+      if (hit) this.select(hit.id, true);
+      return;
+    }
+    if (!hit || !this.selected.has(hit.id)) this.select(hit?.id ?? null);
     if (!hit) return;
-    // Sürükleyerek taşı.
+    // Sürükleyerek taşı: seçili işaretlerin hepsi (aynı sayfadakiler) birlikte gider.
+    const moving = [...this.selected].map((id) => this.find(id)).filter((m): m is Mark => !!m && m.page === at.page);
     const start: [number, number] = [at.x, at.y];
     let last: [number, number] = start;
-    const el = this.viewer.root.querySelectorAll<Element>(`[data-id="${CSS.escape(hit.id)}"]`);
+    const el = moving.flatMap((m) => [...this.viewer.root.querySelectorAll<Element>(`[data-id="${CSS.escape(m.id)}"]`)]);
     this.track(e, at.el, (list) => {
       const [x, y] = list[list.length - 1];
       last = [x, y];
@@ -406,9 +430,31 @@ export class WriteMode {
         el.forEach((n) => ((n as HTMLElement).style.translate = ""));
         return;
       }
-      const after = { ...moveMark(hit, dx, dy), updatedAt: Date.now() };
+      const ops: Op[] = moving.map((m) => ({ before: m, after: { ...moveMark(m, dx, dy), updatedAt: Date.now() } }));
+      ops.forEach((op) => "after" in op && this.actions.update(op.after));
+      this.record(ops);
+    });
+  }
+
+  /** Metin kutusunun sağ kenarındaki tutamaç: genişliği sürükleyerek değiştir. */
+  private resizeText(e: PointerEvent, id: string): void {
+    const m = this.find(id);
+    const pageEl = m && this.viewer.pageElement(m.page);
+    if (!m || m.kind !== "text" || !pageEl) return;
+    e.preventDefault();
+    const box = pageEl.getBoundingClientRect();
+    const node = this.viewer.root.querySelector<HTMLElement>(`.cm-textbox[data-id="${CSS.escape(id)}"]`);
+    let width = m.box[2];
+    this.track(e, pageEl, (list) => {
+      const [x] = list[list.length - 1];
+      width = Math.min(1 - m.box[0], Math.max(40 / box.width, x - m.box[0]));
+      if (node) node.style.width = `${width * 100}%`;
+    }, () => {
+      if (Math.abs(width - m.box[2]) < 0.002) return;
+      const hgt = node ? node.offsetHeight / pageEl.clientHeight : m.box[3];
+      const after = { ...m, box: [m.box[0], m.box[1], width, hgt], updatedAt: Date.now() } as Mark;
       this.actions.update(after);
-      this.record([{ before: hit, after }]);
+      this.record([{ before: m, after }]);
     });
   }
 

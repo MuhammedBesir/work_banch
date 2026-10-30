@@ -1,8 +1,10 @@
-import { contextChars, plainText, segment, type AiContext, type Cite, type Turn } from "../ai/prompt";
+import * as client from "../ai/client";
+import { contextChars, estimateCost, formatCost, plainText, segment, type AiContext, type Cite, type SavedTurn, type Usage } from "../ai/prompt";
 import { num } from "../format";
-import type { AiSettings } from "../types";
-import { AI_MODELS } from "../types";
+import type { AiSettings, Color } from "../types";
+import { AI_PROVIDERS, aiModelLabel, COLORS } from "../types";
 import { h, kbd, marker } from "../util";
+import { openMenu } from "./menu";
 import { toast } from "./toast";
 
 export type Scope = "selection" | "page" | "section" | "highlights" | "hl2" | "hl4";
@@ -17,7 +19,17 @@ export interface AiActions {
   citeJump(c: Cite): void;
   addNote(page: number, text: string): void;
   openSettings(): void;
+  /** Dosya başına sohbet geçmişi (bu tarayıcıda). */
+  loadHistory(): Promise<SavedTurn[]>;
+  saveHistory(turns: SavedTurn[]): void;
+  exportChat(turns: SavedTurn[]): void;
+  /** Cevaptaki kaynakların dayanak metnini seçilen renkle vurgula; kaç vurgu eklendiğini döndürür. */
+  highlightCites(cites: Cite[], color: Color): Promise<number>;
+  colorName(c: Color): string;
 }
+
+/** Cihazdaki küçük modelin bağlam penceresi dar: kapsam bundan uzunsa gönderilmez, söylenir. */
+const DEVICE_MAX_CHARS = 6000;
 
 const SCOPES: [Scope, string][] = [["selection", "Seçim"], ["page", "Bu sayfa"], ["section", "Bölüm"], ["highlights", "Vurgularım"]];
 
@@ -38,7 +50,10 @@ export class AiPanel {
   private scope: Scope = "page";
   private ctx: AiContext | null = null;
   private edited = false;
-  private history: Turn[] = [];
+  private history: SavedTurn[] = [];
+  private historyLoaded = false;
+  private spent = 0;
+  private spentEl: HTMLElement;
   private abort: AbortController | null = null;
   private previewRun = 0;
 
@@ -61,7 +76,15 @@ export class AiPanel {
     });
     this.preview.addEventListener("keydown", (e) => e.stopPropagation());
     this.sentLine = h("div", { class: "cm-ai__sent" });
-    const head = h("div", { class: "cm-panel__head" }, h("div", { class: "cm-panel__title" }, h("span", { text: "AI" }), this.mode));
+    this.spentEl = h("span", { class: "cm-num cm-muted", title: "Bu oturumdaki tahmini AI harcaması" });
+    const head = h("div", { class: "cm-panel__head" },
+      h("div", { class: "cm-panel__title" }, h("span", { text: "AI" }), this.mode),
+      h("div", { class: "cm-panel__tools" },
+        h("button", { class: "cm-linkbtn", onclick: () => this.history.length ? this.actions.exportChat(this.history) : toast("Dışa aktaracak sohbet yok.") }, "Sohbeti dışa aktar"),
+        h("button", { class: "cm-linkbtn", onclick: () => this.clear() }, "Temizle"),
+        this.spentEl,
+      ),
+    );
     const send = h("div", { class: "cm-ai__send" },
       h("div", { class: "cm-field", style: "justify-content:space-between;flex-wrap:wrap;gap:6px" }, h("span", { class: "cm-muted", style: "font-size:12px", text: "Kapsam" }), this.scopeSeg),
       h("div", { style: "display:flex;gap:6px" }, this.input, this.sendBtn),
@@ -76,10 +99,64 @@ export class AiPanel {
   /** Paneli göstermeden önce: kapsamı, sayıları ve gönderilecek satırını tazele. */
   refresh(): void {
     const s = this.actions.settings();
-    const model = AI_MODELS.find(([id]) => id === s.model)?.[1].replace(/ \(.*\)$/, "") ?? s.model;
-    this.mode.textContent = `Bulut · ${model}`;
+    if (s.mode === "off") return;
+    // Mod rozeti yalnızca nerede çalıştığını söyler: cihazda / yerelde yeşil daire, bulut turuncu kare.
+    const cloud = AI_PROVIDERS[s.mode].cloud;
+    this.mode.className = `cm-ai__mode${cloud ? " cm-ai__mode--cloud" : ""}`;
+    this.mode.textContent = `${cloud ? "Bulut" : AI_PROVIDERS[s.mode].short} · ${aiModelLabel(s)}`;
     this.renderQuick();
     void this.loadPreview();
+    if (!this.historyLoaded) {
+      this.historyLoaded = true;
+      void this.actions.loadHistory().then((turns) => {
+        if (!turns.length || this.history.length) return;
+        this.history = turns;
+        this.list.replaceChildren(this.quick);
+        for (const t of turns) this.renderTurn(t);
+        this.appendWarning();
+      });
+    }
+  }
+
+  /** Dosya kapanınca/değişince yeni dosyanın geçmişi yüklensin. */
+  reset(): void {
+    this.history = [];
+    this.historyLoaded = false;
+    this.renderEmpty();
+  }
+
+  private clear(): void {
+    if (this.abort) return;
+    this.history = [];
+    this.actions.saveHistory([]);
+    this.renderEmpty();
+    toast("Sohbet temizlendi");
+  }
+
+  private renderTurn(t: SavedTurn): void {
+    const turn = h("div", { class: "cm-ai__turn" },
+      h("div", { style: "display:flex;flex-direction:column" },
+        h("div", { class: "cm-ai__ctx", style: "align-self:flex-end", text: `${t.label} · ${num(t.chars)} karakter gönderildi` }),
+        h("div", { class: "cm-ai__q", text: t.question }),
+      ),
+    );
+    const answer = h("div", { class: "cm-ai__a" });
+    this.renderAnswer(answer, t.answer, true);
+    turn.append(answer, this.usageLine(t.model, t.usage), this.answerActions(t.answer, t.question, "page"));
+    this.list.append(turn);
+  }
+
+  /** Her cevabın altında: kaç token, yaklaşık ne kadar (fiyatı bilinen modellerde). */
+  private usageLine(model: string, u?: Usage): HTMLElement {
+    if (!u) return h("span");
+    const cost = estimateCost(model, u);
+    return h("div", { class: "cm-ai__usage cm-num" }, `${num(u.input)} giriş + ${num(u.output)} çıkış token${cost !== null ? ` · yaklaşık ${formatCost(cost)}` : ""}`);
+  }
+
+  private appendWarning(): void {
+    const warn = this.list.querySelector(".cm-ai__warn")
+      ?? h("p", { class: "cm-muted cm-ai__warn", style: "margin:0;font-size:12px;line-height:16px", text: "AI yanılabilir. Sadece kaynak gösterdiği yerlere güven; kaynağı olmayan (soluk) cümleyi kontrol et." });
+    this.list.append(warn);
   }
 
   /** Seçim araç çubuğundaki Sor (A): seçim kapsam olarak girişe yerleşir, imleç girişte. */
@@ -193,7 +270,7 @@ export class AiPanel {
   private async run(question: string, scope: Scope, useCurrent = false): Promise<void> {
     if (this.abort) return;
     const s = this.actions.settings();
-    if (!s.apiKey) {
+    if (!client.ready(s)) {
       toast("Önce Ayarlar > AI'dan API anahtarını gir.");
       this.actions.openSettings();
       return;
@@ -211,6 +288,10 @@ export class AiPanel {
     }
     if (!ctx) {
       toast("Bu kapsamda gönderilecek metin yok. Başka bir kapsam seç.");
+      return;
+    }
+    if (s.mode === "device" && contextChars(ctx) > DEVICE_MAX_CHARS) {
+      toast(`Cihazdaki model en fazla ${num(DEVICE_MAX_CHARS)} karakter okuyabilir; bu kapsam ${num(contextChars(ctx))}. Seçim ya da Bu sayfa kapsamını kullan, ya da metni kırp.`, undefined, 7000);
       return;
     }
     if (!this.history.length && this.list.querySelector(".cm-ai__turn") === null) this.list.replaceChildren(this.quick);
@@ -231,11 +312,9 @@ export class AiPanel {
     this.sendBtn.classList.remove("cm-btn--primary");
     let text = "";
     let frame = 0;
-    const client = await import("../ai/client"); // SDK yalnızca AI kullanılınca yüklenir
+    const model = s.mode === "off" ? "" : s.models[s.mode];
     try {
-      const res = await client.ask({
-        apiKey: s.apiKey,
-        model: s.model,
+      const res = await client.ask(s, {
         history: this.history,
         ctx,
         question,
@@ -245,30 +324,40 @@ export class AiPanel {
           cancelAnimationFrame(frame);
           frame = requestAnimationFrame(() => this.renderAnswer(answer, text, false));
         },
+        // Cihazda: ilk cevapta model indirilip hazırlanırken ilerleme.
+        onProgress: (ratio, info) => {
+          answer.replaceChildren(
+            h("p", { class: "cm-muted", text: `Model hazırlanıyor · %${Math.round(ratio * 100)} — ilk seferde indirilir, sonra bu tarayıcıda kalır.` }),
+            h("div", { class: "cm-drop__progress" }, h("div", { style: `width:${Math.round(ratio * 100)}%` })),
+            h("p", { class: "cm-ai__usage", text: info }),
+          );
+        },
       });
       cancelAnimationFrame(frame);
       if (res.stop === "refusal") {
         this.renderError(answer, { title: "AI bu isteği cevaplamadı", text: "Soruyu ya da kapsamı değiştirip yeniden dene." });
       } else {
         this.renderAnswer(answer, res.text, true);
-        this.history.push({ question, answer: res.text });
-        turn.append(this.answerActions(res.text, question, scope));
+        const saved: SavedTurn = { question, answer: res.text, label: ctx.label, chars: contextChars(ctx), at: Date.now(), model, usage: res.usage };
+        this.history.push(saved);
+        this.actions.saveHistory(this.history);
+        if (res.usage) {
+          this.spent += estimateCost(model, res.usage) ?? 0;
+          this.spentEl.textContent = this.spent ? `Oturum: ${formatCost(this.spent)}` : "";
+        }
+        turn.append(this.usageLine(model, res.usage), this.answerActions(res.text, question, scope));
         if (res.stop === "max_tokens") answer.append(h("p", { class: "cm-muted", text: "Cevap uzunluk sınırında kesildi." }));
       }
     } catch (err) {
       cancelAnimationFrame(frame);
       if (text) this.renderAnswer(answer, text, true);
-      this.renderError(answer, client.friendlyError(err), !!text);
+      this.renderError(answer, await client.friendlyError(s, err), !!text);
       if (text) turn.append(this.answerActions(text, question, scope));
     } finally {
       this.abort = null;
       this.sendBtn.textContent = "Sor";
       this.sendBtn.classList.add("cm-btn--primary");
-      if (!this.list.querySelector(".cm-ai__warn")) {
-        this.list.append(h("p", { class: "cm-muted cm-ai__warn", style: "margin:0;font-size:12px;line-height:16px", text: "AI yanılabilir. Sadece kaynak gösterdiği yerlere güven; kaynağı olmayan (soluk) cümleyi kontrol et." }));
-      } else {
-        this.list.append(this.list.querySelector(".cm-ai__warn")!);
-      }
+      this.appendWarning();
     }
   }
 
@@ -321,11 +410,19 @@ export class AiPanel {
   private answerActions(text: string, question: string, scope: Scope): HTMLElement {
     const cites = segment(text.replace(/\n/g, " ")).flatMap((s) => s.cites);
     const page = cites[0]?.page ?? this.ctx?.pages[0]?.page ?? 0;
+    const quoted = cites.filter((c) => c.quote);
+    const hlBtn = h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm", "aria-haspopup": "menu", disabled: !quoted.length, title: quoted.length ? "Kaynakların dayandığı metni sayfada vurgula" : "Bu cevapta alıntılı kaynak yok" }, "Kaynakları vurgula ▾");
+    hlBtn.addEventListener("click", () => openMenu(hlBtn, COLORS.map((c) => ({
+      label: `${this.actions.colorName(c)} · ${c}`,
+      run: () => void this.actions.highlightCites(quoted, c).then((n) => toast(n ? `${num(n)} kaynak vurgulandı` : "Alıntılar sayfada birebir bulunamadı.")),
+    }))));
     return h("div", { style: "display:flex;gap:6px;flex-wrap:wrap" },
       h("button", { class: "cm-btn cm-btn--sm", onclick: () => this.actions.addNote(page, plainText(text)) }, "Not olarak ekle"),
+      hlBtn,
       h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm", onclick: () => navigator.clipboard.writeText(plainText(text)).then(() => toast("Kopyalandı"), () => toast("Kopyalanamadı")) }, "Kopyala"),
       h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm", onclick: () => {
         this.history = this.history.filter((t) => t.answer !== text);
+        this.actions.saveHistory(this.history);
         void this.run(question, scope);
       } }, "Yeniden üret"),
     );

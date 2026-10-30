@@ -116,15 +116,41 @@ export async function deleteMark(id: string): Promise<void> {
   await wrap((await store("marks", "readwrite")).delete(id));
 }
 
+/** Küçük yardımcı kayıtlar (AI sohbet geçmişi, hatırlatma zamanları…). */
+export async function getMeta<T>(key: string): Promise<T | undefined> {
+  return wrap((await store("meta")).get(key));
+}
+
+export async function putMeta(key: string, value: unknown): Promise<void> {
+  await wrap((await store("meta", "readwrite")).put(value, key));
+}
+
 export async function loadSettings(): Promise<Settings> {
   const saved: Partial<Settings> | undefined = await wrap((await store("meta")).get("settings"));
   return {
     ...DEFAULT_SETTINGS,
     ...saved,
     names: { ...DEFAULT_SETTINGS.names, ...saved?.names },
-    ai: { ...DEFAULT_SETTINGS.ai, ...saved?.ai },
+    ai: migrateAi(saved?.ai),
     pen: { ...DEFAULT_SETTINGS.pen, ...saved?.pen },
   };
+}
+
+/** v2 öncesi AI ayarı ({ mode: "cloud", apiKey, model }) yeni biçime çevrilir. */
+function migrateAi(saved: unknown): Settings["ai"] {
+  const d = DEFAULT_SETTINGS.ai;
+  if (!saved || typeof saved !== "object") return structuredClone(d);
+  const old = saved as { mode?: string; apiKey?: string; model?: string } & Partial<Omit<Settings["ai"], "mode">>;
+  if (old.apiKey !== undefined || old.mode === "cloud") {
+    return {
+      ...structuredClone(d),
+      mode: old.mode === "cloud" ? "anthropic" : "off",
+      keys: { ...d.keys, anthropic: old.apiKey ?? "" },
+      models: { ...d.models, ...(old.model ? { anthropic: old.model } : {}) },
+    };
+  }
+  const { apiKey: _k, model: _m, ...rest } = old;
+  return { ...d, ...rest, keys: { ...d.keys, ...old.keys }, models: { ...d.models, ...old.models } } as Settings["ai"];
 }
 
 export async function saveSettings(s: Settings): Promise<void> {

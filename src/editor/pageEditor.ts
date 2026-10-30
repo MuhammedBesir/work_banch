@@ -1,7 +1,7 @@
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { num } from "../format";
 import { openPdf } from "../pdf/load";
-import { h, isTyping, kbd } from "../util";
+import { h, isTyping, kbd, sha256 } from "../util";
 import { openMenu } from "../ui/menu";
 import { toast } from "../ui/toast";
 import type { EditPage, Source } from "./build";
@@ -10,7 +10,7 @@ export type { EditPage, Source };
 
 export interface EditorActions {
   /** Kaydedilen yeni kopya: çıktı ve sayfa haritası (hangi yeni sayfa hangi asıl sayfadan, kaç derece döndürülmüş). */
-  saved(out: Uint8Array, name: string, pages: EditPage[]): void;
+  saved(out: Uint8Array, name: string, pages: EditPage[], sourceHashes: Map<string, string>): void;
   askPassword(name: string, wrong: boolean): Promise<string | null>;
 }
 
@@ -322,7 +322,7 @@ export class PageEditor {
         return;
       }
       const id = `s${this.sources.size}`;
-      this.sources.set(id, { id, name: file.name, bytes, doc });
+      this.sources.set(id, { id, name: file.name, bytes, doc, hash: await sha256(bytes.slice().buffer as ArrayBuffer) });
       const at = this.insertionPoint();
       const added = Array.from({ length: doc.numPages }, (_, i) => ({ key: newKey(), src: id, index: i, rotation: 0 }));
       const next = [...this.pages];
@@ -509,7 +509,8 @@ export class PageEditor {
     try {
       const { buildPdf } = await import("./build"); // pdf-lib yalnızca kaydederken yüklenir
       const out = await buildPdf(pages, this.sources);
-      this.actions.saved(out, name, pages);
+      const hashes = new Map([...this.sources.values()].filter((x) => x.hash).map((x) => [x.id, x.hash!] as [string, string]));
+      this.actions.saved(out, name, pages, hashes);
       if (!onlySelected) this.history = [];
       this.updateBars();
     } catch (err) {

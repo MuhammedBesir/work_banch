@@ -1,7 +1,7 @@
 import { bytes, num } from "../format";
 import { exportFileName, selectForExport, toMarkdown } from "../markdown";
 import type { AiSettings, Color, Highlight, Mark, PdfDark, Settings, ThemeSetting, UiSize } from "../types";
-import { AI_MODELS, COLORS } from "../types";
+import { AI_PROVIDERS, aiModelLabel, COLORS, type AiProvider } from "../types";
 import { download, h, kbd, marker } from "../util";
 import { confirmDialog, openDialog } from "./dialog";
 import { toast } from "./toast";
@@ -71,10 +71,10 @@ export function openSettings(settings: Settings, a: SettingsActions): void {
     h("section", {},
       h("p", { class: "cm-label", text: "AI" }),
       h("div", { style: "display:flex;gap:12px;align-items:center;flex-wrap:wrap" },
-        h("span", { text: s.ai.mode === "cloud"
-          ? `Açık · kendi API anahtarınla · ${AI_MODELS.find(([id]) => id === s.ai.model)?.[1] ?? s.ai.model}`
+        h("span", { text: s.ai.mode !== "off"
+          ? `Açık · ${AI_PROVIDERS[s.ai.mode].label} · ${aiModelLabel(s.ai)}`
           : "Kapalı. Kapalıyken AI'a dair hiçbir düğme görünmez." }),
-        h("button", { class: "cm-btn cm-btn--sm", onclick: () => (d.close(), a.ai()) }, s.ai.mode === "cloud" ? "AI ayarları…" : "AI'yı aç…"),
+        h("button", { class: "cm-btn cm-btn--sm", onclick: () => (d.close(), a.ai()) }, s.ai.mode !== "off" ? "AI ayarları…" : "AI'yı aç…"),
       ),
     ),
     h("section", { style: "display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:24px" },
@@ -230,37 +230,83 @@ export function confirmBigFile(name: string, size: number, pages?: number): Prom
 
 /**
  * AI'nın nerede çalışacağı. İlk açılışta bir kez sorulur, Ayarlar > AI'dan değişir.
- * Bu sürümde: kendi API anahtarınla ya da kapalı. Arada bizim sunucumuz yok.
+ * Bulut seçeneklerinde arada bizim sunucumuz yok; istek tarayıcıdan doğrudan sağlayıcıya gider.
  */
-export function openAiSetup(current: AiSettings, save: (ai: AiSettings) => void): void {
-  const ai: AiSettings = { ...current };
-  const d = openDialog({ title: "AI'yı nasıl çalıştıralım?", width: 820 });
-  const key = h("input", { class: "cm-input", type: "password", autocomplete: "off", spellcheck: "false", placeholder: "sk-ant-…", "aria-label": "Anthropic API anahtarı", value: ai.apiKey });
-  const model = h("select", { class: "cm-input", "aria-label": "Model" }, ...AI_MODELS.map(([id, label]) => h("option", { value: id, text: label, selected: id === ai.model })));
+export function openAiSetup(current: AiSettings, save: (ai: AiSettings) => void, webgpu: Promise<{ ok: boolean; reason?: string }>): void {
+  const ai: AiSettings = structuredClone(current);
+  if (ai.mode === "off") ai.mode = "off";
+  const d = openDialog({ title: "AI'yı nasıl çalıştıralım?", width: 860 });
   const err = h("p", { role: "alert", style: "margin:4px 0 0;color:var(--danger);font-size:13px;line-height:18px", hidden: true });
-  const fields = h("div", { style: "display:flex;flex-direction:column;gap:8px;margin:4px 0 0 28px" },
-    h("label", { class: "cm-muted", style: "font-size:12px;line-height:16px", text: "Anthropic API anahtarı" }), key,
-    h("label", { class: "cm-muted", style: "font-size:12px;line-height:16px", text: "Model" }), model,
-    h("p", { class: "cm-muted", style: "margin:0;font-size:12px;line-height:16px", text: "Düşük harcama sınırlı bir anahtar kullanman iyi olur. Anahtar yalnızca bu tarayıcıda saklanır, yedeğe girmez." }),
-    err,
-  );
-  const option = (mode: AiSettings["mode"], title: string, text: string) => {
-    const el = h("button", { class: `cm-option${ai.mode === mode ? " is-on" : ""}`, role: "radio", "aria-checked": String(ai.mode === mode), onclick: () => {
-      ai.mode = mode;
-      render();
-    } }, h("span", { class: "cm-radio" }), h("div", {}, h("div", { style: "font-weight:600", text: title }), h("div", { class: "cm-muted", style: "font-size:13px;line-height:18px", text })));
+  const small = (text: string) => h("p", { class: "cm-muted", style: "margin:0;font-size:12px;line-height:16px", text });
+  const label = (text: string) => h("label", { class: "cm-muted", style: "font-size:12px;line-height:16px", text });
+  let gpu: { ok: boolean; reason?: string } | null = null;
+
+  // Her seçeneğin alanları: anahtar, model, adres.
+  const keyInput = (p: "anthropic" | "openai", placeholder: string) => {
+    const el = h("input", { class: "cm-input", type: "password", autocomplete: "off", spellcheck: "false", placeholder, "aria-label": `${AI_PROVIDERS[p].label} API anahtarı`, value: ai.keys[p] });
+    el.addEventListener("input", () => (ai.keys[p] = el.value.trim()));
     return el;
   };
+  const modelInput = (p: AiProvider, free: boolean) => {
+    if (!free) {
+      const sel = h("select", { class: "cm-input", "aria-label": "Model" }, ...AI_PROVIDERS[p].models.map(([id, l]) => h("option", { value: id, text: l, selected: id === ai.models[p] })));
+      sel.addEventListener("change", () => (ai.models[p] = sel.value));
+      return sel;
+    }
+    const listId = `models-${p}`;
+    const el = h("input", { class: "cm-input", "aria-label": "Model adı", value: ai.models[p], list: listId, spellcheck: "false" });
+    el.addEventListener("input", () => (ai.models[p] = el.value.trim()));
+    return h("div", {}, el, h("datalist", { id: listId }, ...AI_PROVIDERS[p].models.map(([id]) => h("option", { value: id }))));
+  };
+  const urlInput = () => {
+    const el = h("input", { class: "cm-input", "aria-label": "Sunucu adresi", value: ai.localUrl, spellcheck: "false" });
+    el.addEventListener("input", () => (ai.localUrl = el.value.trim()));
+    return el;
+  };
+  const fields: Record<AiProvider, () => HTMLElement> = {
+    anthropic: () => h("div", { class: "cm-ai-fields" },
+      label("Anthropic API anahtarı"), keyInput("anthropic", "sk-ant-…"), label("Model"), modelInput("anthropic", false),
+      small("Düşük harcama sınırlı bir anahtar kullanman iyi olur. Anahtar yalnızca bu tarayıcıda saklanır, yedeğe girmez.")),
+    openai: () => h("div", { class: "cm-ai-fields" },
+      label("OpenAI API anahtarı"), keyInput("openai", "sk-…"), label("Model"), modelInput("openai", true),
+      small("Model adını OpenAI hesabında kullanabildiğin modellerden yaz. Ücret gösterilmez; harcamayı OpenAI panelinden izle.")),
+    local: () => h("div", { class: "cm-ai-fields" },
+      label("Sunucu adresi (OpenAI uyumlu)"), urlInput(), label("Model"), modelInput("local", true),
+      small("Ollama: http://localhost:11434/v1 · LM Studio: http://localhost:1234/v1. Tarayıcının erişebilmesi için sunucuda CORS izni gerekir (Ollama'da OLLAMA_ORIGINS ortam değişkeni). Metin bilgisayarından çıkmaz.")),
+    device: () => {
+      const box = h("div", { class: "cm-ai-fields" }, label("Model"), modelInput("device", false),
+        small("Model ilk soruda bir kez indirilir (1–2 GB) ve bu tarayıcıda kalır; indirme sırasında okumaya devam edebilirsin. Kısa açıklama ve basitleştirmede iyi, uzun özette zayıf; telefonda önerilmez."));
+      if (gpu && !gpu.ok) box.append(h("p", { class: "cm-ai__err", style: "margin:0;font-size:13px", text: gpu.reason ?? "" }));
+      return box;
+    },
+  };
+  const option = (mode: AiSettings["mode"], title: string, text: string, disabled = false) =>
+    h("button", { class: `cm-option${ai.mode === mode ? " is-on" : ""}`, role: "radio", "aria-checked": String(ai.mode === mode), disabled, onclick: () => {
+      ai.mode = mode;
+      err.hidden = true;
+      render();
+    } }, h("span", { class: "cm-radio" }), h("div", {}, h("div", { style: "font-weight:600", text: title }), h("div", { class: "cm-muted", style: "font-size:13px;line-height:18px", text })));
   const choices = h("div", { role: "radiogroup", "aria-label": "AI çalışma yeri", style: "display:flex;flex-direction:column;gap:8px" });
   const render = () => {
-    choices.replaceChildren(
-      option("cloud", "Kendi API anahtarınla", "Seçtiğin metin tarayıcından doğrudan Anthropic'e (Claude) gider; arada bizim sunucumuz yok. Hızlı ve güçlü. Ücret ve veri politikası sağlayıcının."),
-      ...(ai.mode === "cloud" ? [fields] : []),
-      option("off", "Kapalı", "AI düğmeleri gizlenir. İstediğin zaman Ayarlar'dan açabilirsin."),
-    );
+    const opts: [AiSettings["mode"], string, string, boolean?][] = [
+      ["device", "Bu cihazda", gpu && !gpu.ok ? `Bu tarayıcıda kullanılamaz: ${gpu.reason}` : "Metin tarayıcıdan hiç çıkmaz. WebGPU ister; daha yavaş.", gpu ? !gpu.ok : false],
+      ["local", "Bilgisayarımdaki model", "Ollama ya da LM Studio gibi yerel bir sunucu. Metin bilgisayarından çıkmaz."],
+      ["anthropic", "Kendi Anthropic anahtarınla (Claude)", "Seçtiğin metin tarayıcından doğrudan Anthropic'e gider; arada bizim sunucumuz yok. Hızlı ve güçlü."],
+      ["openai", "Kendi OpenAI anahtarınla", "Seçtiğin metin tarayıcından doğrudan OpenAI'ye gider; arada bizim sunucumuz yok."],
+      ["off", "Kapalı", "AI düğmeleri gizlenir. İstediğin zaman Ayarlar'dan açabilirsin."],
+    ];
+    choices.replaceChildren(...opts.flatMap(([mode, title, text, disabled]) => [
+      option(mode, title, text, disabled),
+      ...(ai.mode === mode && mode !== "off" ? [fields[mode as AiProvider]()] : []),
+    ]), err);
   };
   render();
-  d.body.style.cssText = "display:grid;grid-template-columns:minmax(0,1fr) minmax(0,280px);gap:24px";
+  void webgpu.then((g) => {
+    gpu = g;
+    if (!g.ok && ai.mode === "device") ai.mode = current.mode;
+    render();
+  });
+  d.body.style.cssText = "display:grid;grid-template-columns:minmax(0,1fr) minmax(0,260px);gap:24px";
   d.body.append(
     choices,
     h("div", { style: "border-left:1px solid var(--line);padding-left:24px" },
@@ -268,6 +314,7 @@ export function openAiSetup(current: AiSettings, save: (ai: AiSettings) => void)
       h("ul", { style: "margin:0 0 16px;padding-left:18px;display:flex;flex-direction:column;gap:6px" },
         h("li", { text: "Yalnızca seçtiğin kapsam: seçim, sayfa, bölüm ya da vurguların" }),
         h("li", { text: "Gönderilecek karakter sayısı her istekte görünür; göndermeden kırpabilirsin" }),
+        h("li", { text: "Cihazda ve yerel sunucuda: hiçbir şey internete gitmez" }),
       ),
       h("p", { class: "cm-label", text: "Asla gönderilmez" }),
       h("ul", { style: "margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px" },
@@ -277,26 +324,27 @@ export function openAiSetup(current: AiSettings, save: (ai: AiSettings) => void)
       ),
     ),
   );
+  const hasKeys = !!(current.keys.anthropic || current.keys.openai);
   d.foot.append(
-    h("span", { class: "cm-trust", text: "Seçimin ve anahtarın bu tarayıcıda saklanır." }),
+    h("span", { class: "cm-trust", text: "Seçimin ve anahtarların bu tarayıcıda saklanır." }),
     h("div", { style: "display:flex;gap:8px" },
-      current.apiKey ? h("button", { class: "cm-btn cm-btn--ghost cm-btn--danger", onclick: () => {
-        save({ ...current, apiKey: "", mode: "off" });
-        toast("API anahtarı silindi, AI kapatıldı");
+      hasKeys ? h("button", { class: "cm-btn cm-btn--ghost cm-btn--danger", onclick: () => {
+        save({ ...current, keys: { anthropic: "", openai: "" }, mode: current.mode === "anthropic" || current.mode === "openai" ? "off" : current.mode });
+        toast("API anahtarları silindi");
         d.close();
-      } }, "Anahtarı sil") : h("span"),
+      } }, "Anahtarları sil") : h("span"),
       h("button", { class: "cm-btn", onclick: d.close }, "Şimdi değil"),
       h("button", { class: "cm-btn cm-btn--primary", onclick: () => {
-        ai.apiKey = key.value.trim();
-        ai.model = model.value;
-        if (ai.mode === "cloud" && !/^sk-ant-/.test(ai.apiKey)) {
+        const fail = (msg: string) => {
           err.hidden = false;
-          err.textContent = "Bu bir Anthropic API anahtarına benzemiyor. Anahtarlar sk-ant- ile başlar; console.anthropic.com'dan alabilirsin.";
-          key.focus();
-          return;
-        }
+          err.textContent = msg;
+        };
+        if (ai.mode === "anthropic" && !/^sk-ant-/.test(ai.keys.anthropic)) return fail("Bu bir Anthropic API anahtarına benzemiyor. Anahtarlar sk-ant- ile başlar; console.anthropic.com'dan alabilirsin.");
+        if (ai.mode === "openai" && !/^sk-/.test(ai.keys.openai)) return fail("Bu bir OpenAI API anahtarına benzemiyor. Anahtarlar sk- ile başlar; platform.openai.com'dan alabilirsin.");
+        if (ai.mode === "local" && !/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(ai.localUrl)) return fail("Yerel sunucu adresi http://localhost:PORT/v1 biçiminde olmalı. Güvenlik için yalnızca bu bilgisayardaki sunuculara bağlanılır.");
+        if (ai.mode !== "off" && !ai.models[ai.mode]) return fail("Model adını yaz.");
         save(ai);
-        toast(ai.mode === "cloud" ? "AI açıldı · Ctrl J ile paneli aç" : "AI kapalı");
+        toast(ai.mode !== "off" ? "AI açıldı · Ctrl J ile paneli aç" : "AI kapalı");
         d.close();
       } }, "Kaydet"),
     ),

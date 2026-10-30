@@ -51,6 +51,7 @@ button.cm-bar__file { display: block; line-height: 26px; text-align: left; }
 [data-theme="dark"] .cm-page .cm-margin.cm-mk--1 { background: var(--hl-1-mark); } [data-theme="dark"] .cm-page .cm-margin.cm-mk--2 { background: var(--hl-2-mark); }
 [data-theme="dark"] .cm-page .cm-margin.cm-mk--3 { background: var(--hl-3-mark); } [data-theme="dark"] .cm-page .cm-margin.cm-mk--4 { background: var(--hl-4-mark); }
 .cm-searchhit { position: absolute; border: 2px solid var(--accent); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--selection) 45%, transparent); }
+.cm-searchhit--other { border: 0; background: color-mix(in srgb, var(--selection) 35%, transparent); }
 
 /* pdf.js metin katmanı (pdf_viewer.css'in gerekli kısmı) */
 .textLayer { position: absolute; text-align: initial; inset: 0; overflow: clip; opacity: 1; line-height: 1; text-size-adjust: none; forced-color-adjust: none; transform-origin: 0 0; caret-color: CanvasText; z-index: 2; }
@@ -137,6 +138,10 @@ button.cm-bar__file { display: block; line-height: 26px; text-align: left; }
 .cm-stroke--black, .cm-stroke--black * { stroke: var(--pen-black); }
 .cm-stroke--blue, .cm-stroke--blue * { stroke: var(--pen-blue); }
 .cm-stroke--red, .cm-stroke--red * { stroke: var(--pen-red); }
+.cm-stroke--fill { stroke: none !important; }
+.cm-stroke--fill.cm-stroke--black { fill: var(--pen-black); } .cm-stroke--fill.cm-stroke--blue { fill: var(--pen-blue); } .cm-stroke--fill.cm-stroke--red { fill: var(--pen-red); }
+.cm-textbox__handle { position: absolute; right: -5px; top: 50%; width: 9px; height: 18px; margin-top: -9px; background: var(--surface-raised); border: 1.5px solid var(--accent); border-radius: 2px; cursor: ew-resize; pointer-events: auto; }
+.cm-thumb__page .cm-ink { --z: .18; z-index: 1; }
 .cm-stroke.is-selected { filter: drop-shadow(0 0 1.5px var(--accent)) drop-shadow(0 0 1.5px var(--accent)); }
 /* Metin kutusu ve not yüzde ile konumlanır, zoom ile (--z) ölçeklenir; sayfa koyu temada da açık kaldığı için renkler sabit. */
 .cm-page .cm-textbox { font-size: calc(14px * var(--z, 1)); line-height: 1.43; padding: calc(4px * var(--z, 1)) calc(6px * var(--z, 1)); white-space: pre-wrap; overflow-wrap: anywhere; min-height: 1.43em; outline: none; }
@@ -178,6 +183,11 @@ button.cm-bar__file { display: block; line-height: 26px; text-align: left; }
 .cm-ai__sent .cm-linkbtn { font-size: 12px; min-height: 0; text-decoration: underline; }
 .cm-ai__send .cm-seg--sm button { padding: 0 8px; font-size: 12px; }
 .cm-quick .cm-chip:disabled { opacity: .5; cursor: default; }
+.cm-ai-fields { display: flex; flex-direction: column; gap: 6px; margin: 0 0 4px 28px; }
+.cm-ai__usage { font-size: 11px; line-height: 16px; color: var(--ink-muted); }
+.cm-ai .cm-panel__tools { gap: var(--space-3); justify-content: flex-start; }
+.cm-ai .cm-panel__tools .cm-num { margin-left: auto; }
+.cm-option:disabled { opacity: .55; cursor: not-allowed; }
 .cm-citehit { position: absolute; border-bottom: 2px dotted var(--ai-cite); background: color-mix(in srgb, var(--selection) 55%, transparent); border-radius: 2px; }
 
 /* ---------- uyarı bandı ---------- */
@@ -282,6 +292,12 @@ label.cm-field { cursor: pointer; }
   .cm-floatwrap.is-mobile { position: fixed; left: 0 !important; right: 0; top: auto !important; bottom: 0; display: flex; justify-content: center; padding: var(--space-2); background: var(--surface); border-top: 1px solid var(--line-strong); }
   .cm-floatwrap.is-mobile .cm-float { box-shadow: none; flex-wrap: wrap; justify-content: center; }
   .cm-home { padding-top: var(--space-6); }
+  /* Telefonda palet: alta, gezinme çubuğunun üstüne yatay ve kaydırılabilir şerit. */
+  .cm-stagewrap > .cm-palette { top: auto; bottom: var(--space-2); left: var(--space-2); right: var(--space-2); width: auto; max-height: none; flex-direction: row; align-items: center; overflow-x: auto; padding: 4px 6px; }
+  .cm-stagewrap > .cm-palette .cm-tool { min-width: 52px; min-height: var(--target-touch); flex: none; }
+  .cm-stagewrap > .cm-palette .cm-palette__sep { width: 1px; height: 28px; margin: 0 4px; flex: none; }
+  .cm-stagewrap > .cm-palette .cm-pen { flex: none; margin: 0 6px; width: 28px; height: 28px; }
+  .cm-stagewrap > .cm-palette .cm-width { flex: none; width: 44px; height: var(--target-touch); }
   .cm-display { font-size: 24px; line-height: 30px; }
   .cm-shortcuts { grid-template-columns: 1fr; }
 }

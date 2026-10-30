@@ -12,12 +12,12 @@ import "./styles/app.css";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import * as db from "./db";
 import { createBackup, parseBackup, restoreBackup } from "./backup";
-import { num, percent } from "./format";
+import { dateLong, num, percent } from "./format";
 import { readingOrder, rotateRect } from "./geometry";
 import { looksLikePdf, looksScanned, loadOutline, OpenError, openPdf, pageText, type OutlineItem } from "./pdf/load";
 import { Viewer, type SelectionPart } from "./pdf/viewer";
 import { PageEditor, type EditPage } from "./editor/pageEditor";
-import type { AiContext, Cite } from "./ai/prompt";
+import { chatMarkdown, type AiContext, type Cite, type SavedTurn } from "./ai/prompt";
 import type { AiSettings, Color, FileRecord, Highlight, Mark, Settings } from "./types";
 import { COLORS } from "./types";
 import { announce, download, h, isTyping, kbd, sha256, uid } from "./util";
@@ -146,10 +146,11 @@ function settingsDialog(): void {
 }
 
 function aiSetup(): void {
-  openAiSetup(settings.ai, (ai: AiSettings) => void changeSettings({ ...settings, ai }));
+  const webgpu = import("./ai/device").then((m) => m.webgpuStatus()).catch(() => ({ ok: false, reason: "WebGPU denetlenemedi." }));
+  openAiSetup(settings.ai, (ai: AiSettings) => void changeSettings({ ...settings, ai }), webgpu);
 }
 
-const aiOn = () => settings.ai.mode === "cloud";
+const aiOn = () => settings.ai.mode !== "off";
 
 /** AI kapalıyken AI'a dair hiçbir düğme görünmez. */
 function updateAiUi(): void {
@@ -299,8 +300,14 @@ async function openFile(file: File, handle?: FsHandle): Promise<void> {
     scrollMode: existing?.scrollMode,
     scannedDismissed: existing?.scannedDismissed,
     handle: handle ?? existing?.handle,
+    // Aynı içerik farklı adla açıldıysa eski ad hatırlanır; vurgular içeriğe bağlı olduğu için geri gelir.
+    aliases: [...new Set([...(existing?.aliases ?? []), ...(existing && existing.name !== file.name ? [existing.name] : [])])].filter((n) => n !== file.name),
   };
   await db.putFile(rec);
+  if (existing && existing.name !== file.name) {
+    const n = await db.countHighlights(hash);
+    toast(`Bu dosyayı daha önce „${existing.name}" adıyla açmıştın${n ? `; ${num(n)} vurgun geri geldi` : ""}.`, undefined, 6000);
+  }
   const meta = await doc.getMetadata().catch(() => null);
   const title = ((meta?.info as { Title?: string } | undefined)?.Title || "").trim() || file.name.replace(/\.pdf$/i, "");
   await openReader({ rec, bytes, doc, title });
@@ -393,7 +400,8 @@ function drawMarks(page: number): void {
   if (!el || (!list.length && !el.querySelector(".cm-page__marks"))) return;
   renderMarks(el, page, list, {
     editable: reader.write.editableMarks,
-    selectedId: reader.write.selectedId,
+    selected: reader.write.selected,
+    scale: reader.viewer.scale,
     onSticky: (id, collapsed) => {
       const m = marks.find((x) => x.id === id);
       if (m?.kind === "sticky") updateMark({ ...m, collapsed });
@@ -406,6 +414,7 @@ function refreshMarks(pages?: number[]): void {
   indexMarks();
   const list = pages ?? [...Array(reader.viewer.pageCount).keys()];
   list.forEach(drawMarks);
+  reader.rail.setDrawings(marksByPage);
   reader.panel.setData(highlights, settings.names, marks);
   updatePanelCount();
 }
@@ -630,9 +639,10 @@ async function openReader(file: OpenDoc): Promise<void> {
         return;
       }
       viewer.goTo(m.page);
-      const rects = await viewer.findRects(m.page, q, m.occurrence);
-      viewer.showSearchHit(m.page, rects);
-      if (rects[0]) viewer.reveal(m.page, rects[0]);
+      const all = await viewer.findAllRects(m.page, q);
+      viewer.showSearchHits(m.page, all, m.occurrence);
+      const rects = all[m.occurrence];
+      if (rects?.[0]) viewer.reveal(m.page, rects[0]);
     },
     close: () => stage.focus({ preventScroll: true }),
   });
@@ -658,6 +668,11 @@ async function openReader(file: OpenDoc): Promise<void> {
     citeJump: (c) => void jumpCite(c),
     addNote: (page, text) => addAiNote(page, text),
     openSettings: aiSetup,
+    loadHistory: async () => (await db.getMeta<SavedTurn[]>(`ai:${file.rec.hash}`)) ?? [],
+    saveHistory: (turns) => void db.putMeta(`ai:${file.rec.hash}`, turns),
+    exportChat: (turns) => download(`${file.rec.name.replace(/\.pdf$/i, "")}-ai-sohbet.md`, chatMarkdown(file.title, turns, dateLong), "text/markdown;charset=utf-8"),
+    highlightCites: (cites, color) => highlightCites(cites, color),
+    colorName: (c) => settings.names[c],
   });
   ai.el.hidden = true;
   const tab = (id: "marks" | "ai", label: string) =>
@@ -859,7 +874,7 @@ async function setMode(mode: Mode): Promise<void> {
     r.search.el.hidden = true;
     const editor = new PageEditor(
       { id: "main", name: r.file.rec.name, bytes: r.file.bytes, doc: r.file.doc },
-      { saved: (out, name, pages) => void onEditorSaved(out, name, pages), askPassword: (n, w) => askPassword(n, w) },
+      { saved: (out, name, pages, hashes) => void onEditorSaved(out, name, pages, hashes), askPassword: (n, w) => askPassword(n, w) },
     );
     r.editor = editor;
     r.body.hidden = true;
@@ -882,13 +897,26 @@ async function setMode(mode: Mode): Promise<void> {
 }
 
 /** Düzenle modunda kaydedilen kopya: vurgular ve yer imleri sayfalarıyla birlikte yeni dosyaya taşınır. */
-async function onEditorSaved(out: Uint8Array, name: string, pages: EditPage[]): Promise<void> {
+async function onEditorSaved(out: Uint8Array, name: string, pages: EditPage[], sourceHashes: Map<string, string>): Promise<void> {
   if (!reader) return;
   const hash = await sha256(out.slice().buffer as ArrayBuffer);
   const moved: Highlight[] = [];
   const movedMarks: Mark[] = [];
   const bookmarks: number[] = [];
+  // Birleştirilen PDF'ler daha önce açılıp vurgulandıysa onların işaretleri de taşınır.
+  const other = new Map<string, { hl: Highlight[]; marks: Mark[] }>();
+  for (const [id, h] of sourceHashes) other.set(id, { hl: await db.highlightsFor(h), marks: await db.marksFor(h) });
   pages.forEach((p, newIndex) => {
+    if (p.src && p.src !== "main") {
+      const src = other.get(p.src);
+      for (const hl of src?.hl.filter((x) => x.page === p.index) ?? []) {
+        moved.push({ ...hl, id: uid(), fileHash: hash, page: newIndex, rects: hl.rects.map((r) => rotateRect(r, p.rotation)), updatedAt: Date.now() });
+      }
+      for (const m of src?.marks.filter((x) => x.page === p.index) ?? []) {
+        movedMarks.push({ ...rotateMark(m, p.rotation), id: uid(), fileHash: hash, page: newIndex, updatedAt: Date.now() });
+      }
+      return;
+    }
     if (p.src !== "main") return;
     for (const hl of byPage.get(p.index) ?? []) {
       moved.push({ ...hl, id: uid(), fileHash: hash, page: newIndex, rects: hl.rects.map((r) => rotateRect(r, p.rotation)), updatedAt: Date.now() });
@@ -960,8 +988,11 @@ function onHighlightClick(id: string): void {
 async function createFromPending(color: Color): Promise<Highlight[]> {
   if (!pending || !reader) return [];
   const now = Date.now();
+  // Birden fazla sayfaya yayılan seçim: parçalar tek vurgu gibi davranır (aynı grup).
+  const group = pending.length > 1 ? uid() : undefined;
   const created = pending.map<Highlight>((p) => ({
     id: uid(), fileHash: reader!.file.rec.hash, page: p.page, color, rects: p.rects, text: p.text, note: "", createdAt: now, updatedAt: now,
+    ...(group ? { group } : {}),
   }));
   highlights.push(...created);
   pending = null;
@@ -992,13 +1023,16 @@ async function applyColor(color: Color): Promise<void> {
   }
   const hl = highlights.find((x) => x.id === activeId);
   if (!hl) return;
-  hl.color = color;
-  hl.updatedAt = Date.now();
+  const parts = groupOf(hl);
+  for (const p of parts) {
+    p.color = color;
+    p.updatedAt = Date.now();
+  }
   lastColor = color;
-  refreshHighlights([hl.page]);
+  refreshHighlights(parts.map((p) => p.page));
   showFloatFor(hl.page, hl.rects, "applied", color);
   announce(`${settings.names[color]} olarak değiştirildi`);
-  await db.putHighlight(hl);
+  await db.putHighlights(parts);
 }
 
 async function noteFromFloat(): Promise<void> {
@@ -1026,14 +1060,21 @@ async function saveNote(id: string, note: string): Promise<void> {
   await db.putHighlight(hl);
 }
 
+/** Bir vurgunun bütün parçaları (sayfalar arası seçimde birden fazla). */
+function groupOf(hl: Highlight): Highlight[] {
+  return hl.group ? highlights.filter((x) => x.group === hl.group) : [hl];
+}
+
 function removeHighlight(id: string): void {
   const hl = highlights.find((x) => x.id === id);
   if (!hl || !reader) return;
-  highlights = highlights.filter((x) => x.id !== id);
-  deleted.push([hl]);
+  const parts = groupOf(hl);
+  const ids = new Set(parts.map((p) => p.id));
+  highlights = highlights.filter((x) => !ids.has(x.id));
+  deleted.push(parts);
   hideFloat();
-  refreshHighlights([hl.page]);
-  void db.deleteHighlight(id);
+  refreshHighlights(parts.map((p) => p.page));
+  parts.forEach((p) => void db.deleteHighlight(p.id));
   announce("Vurgu silindi");
   closeDeleteToast?.();
   closeDeleteToast = toast("Vurgu silindi", { label: "Geri al", shortcut: "Ctrl Z", run: () => void undoDelete() });
@@ -1175,6 +1216,26 @@ async function jumpCite(c: Cite): Promise<void> {
   } else if (c.quote) {
     toast(`Alıntı sayfa ${num(c.page + 1)}'de birebir bulunamadı; kaynağı kendin kontrol et.`, undefined, 4000);
   }
+}
+
+/** Cevaptaki kaynakların dayanak metnini vurgula (açık bir tıkla, seçilen renkle). */
+async function highlightCites(cites: Cite[], color: Color): Promise<number> {
+  if (!reader) return 0;
+  const now = Date.now();
+  const created: Highlight[] = [];
+  for (const c of cites) {
+    if (c.page < 0 || c.page >= reader.viewer.pageCount || !c.quote) continue;
+    const rects = await reader.viewer.findRects(c.page, c.quote, 0);
+    if (!rects.length) continue;
+    // Aynı yer zaten vurgulanmışsa yinelenmesin.
+    if ((byPage.get(c.page) ?? []).some((x) => Math.abs((x.rects[0]?.[1] ?? -1) - rects[0][1]) < 0.003 && Math.abs((x.rects[0]?.[0] ?? -1) - rects[0][0]) < 0.01)) continue;
+    created.push({ id: uid(), fileHash: reader.file.rec.hash, page: c.page, color, rects, text: c.quote, note: "", createdAt: now, updatedAt: now });
+  }
+  if (!created.length) return 0;
+  highlights.push(...created);
+  refreshHighlights(created.map((x) => x.page));
+  await db.putHighlights(created);
+  return created.length;
 }
 
 /** AI cevabı yalnızca açık bir tıkla, "AI" etiketli yapışkan not olarak eklenir. */

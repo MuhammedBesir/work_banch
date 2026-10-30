@@ -15,6 +15,8 @@ export interface Highlight {
   note: string;
   createdAt: number;
   updatedAt: number;
+  /** Birden fazla sayfaya yayılan seçim: parçalar aynı grup kimliğini taşır ve tek vurgu gibi davranır. */
+  group?: string;
 }
 
 export type PenColor = "black" | "blue" | "red";
@@ -23,7 +25,7 @@ export type ShapeKind = "rect" | "ellipse" | "arrow";
 
 /** Yaz modundaki işaret. Koordinatlar sayfaya göre 0–1 arası. */
 export type Mark =
-  | (MarkBase & { kind: "ink"; color: PenColor; width: number; points: [number, number][] })
+  | (MarkBase & { kind: "ink"; color: PenColor; width: number; points: [number, number][]; pressures?: number[] })
   | (MarkBase & { kind: "shape"; color: PenColor; width: number; shape: ShapeKind; from: [number, number]; to: [number, number] })
   | (MarkBase & { kind: "text"; color: PenColor; box: Rect; text: string })
   | (MarkBase & { kind: "sticky"; box: Rect; text: string; collapsed?: boolean; ai?: boolean });
@@ -48,6 +50,8 @@ export interface FileRecord {
   bookmarks: number[];
   scrollMode?: ScrollMode;
   scannedDismissed?: boolean;
+  /** Aynı içeriğin daha önce açıldığı diğer dosya adları. */
+  aliases?: string[];
   /** File System Access API tutamacı (yalnızca Chromium). */
   handle?: FileSystemFileHandle;
 }
@@ -56,20 +60,46 @@ export type ThemeSetting = "light" | "dark" | "system";
 export type PdfDark = "soften" | "original";
 export type UiSize = "small" | "normal" | "large";
 
-export type AiMode = "off" | "cloud";
+/** AI'nın nerede çalıştığı: bulut sağlayıcısı (kendi anahtarınla), bilgisayardaki yerel sunucu ya da tarayıcıda (cihazda). */
+export type AiProvider = "anthropic" | "openai" | "local" | "device";
+export type AiMode = "off" | AiProvider;
 
 export interface AiSettings {
   mode: AiMode;
   /** Yalnızca bu tarayıcıda saklanır; yedeğe girmez. */
-  apiKey: string;
-  model: string;
+  keys: { anthropic: string; openai: string };
+  models: Record<AiProvider, string>;
+  /** OpenAI uyumlu yerel sunucu (Ollama, LM Studio). */
+  localUrl: string;
 }
 
-export const AI_MODELS: [string, string][] = [
-  ["claude-opus-5-5", "Claude Opus 5.5 (en iyi)"],
-  ["claude-sonnet-5-5", "Claude Sonnet 5.5 (hızlı)"],
-  ["claude-haiku-5-5", "Claude Haiku 5.5 (en ucuz)"],
-];
+export const AI_PROVIDERS: Record<AiProvider, { label: string; short: string; cloud: boolean; models: [string, string][] }> = {
+  anthropic: {
+    label: "Anthropic (Claude)", short: "Claude", cloud: true,
+    models: [
+      ["claude-opus-5-5", "Claude Opus 5.5 (en iyi)"],
+      ["claude-sonnet-5-5", "Claude Sonnet 5.5 (hızlı)"],
+      ["claude-haiku-5-5", "Claude Haiku 5.5 (en ucuz)"],
+    ],
+  },
+  openai: { label: "OpenAI", short: "OpenAI", cloud: true, models: [["gpt-5", "GPT-5"], ["gpt-5-mini", "GPT-5 mini"]] },
+  local: { label: "Bilgisayarımdaki model (Ollama, LM Studio)", short: "Yerel sunucu", cloud: false, models: [["llama3.1", "llama3.1"], ["qwen2.5", "qwen2.5"]] },
+  device: {
+    label: "Bu tarayıcıda (cihazda)", short: "Cihazda", cloud: false,
+    models: [
+      ["Qwen2.5-1.5B-Instruct-q4f16_1-MLC", "Qwen 2.5 1.5B · ~1 GB (önerilen)"],
+      ["Qwen3-1.7B-q4f16_1-MLC", "Qwen 3 1.7B · ~1,1 GB"],
+      ["Llama-3.2-3B-Instruct-q4f16_1-MLC", "Llama 3.2 3B · ~1,8 GB (daha iyi, daha yavaş)"],
+    ],
+  },
+};
+
+export const aiModelLabel = (ai: AiSettings): string => {
+  if (ai.mode === "off") return "";
+  const p = AI_PROVIDERS[ai.mode];
+  const id = ai.models[ai.mode];
+  return p.models.find(([m]) => m === id)?.[1].replace(/ \(.*\)$/, "").replace(/ ·.*$/, "") ?? id;
+};
 
 export interface Settings {
   names: Record<Color, string>;
@@ -98,6 +128,11 @@ export const DEFAULT_SETTINGS: Settings = {
   panelWidth: 344,
   railOpen: true,
   panelOpen: true,
-  ai: { mode: "off", apiKey: "", model: "claude-opus-5-5" },
+  ai: {
+    mode: "off",
+    keys: { anthropic: "", openai: "" },
+    models: { anthropic: "claude-opus-5-5", openai: "gpt-5-mini", local: "llama3.1", device: "Qwen2.5-1.5B-Instruct-q4f16_1-MLC" },
+    localUrl: "http://localhost:11434/v1",
+  },
   pen: { color: "blue", width: 2 },
 };

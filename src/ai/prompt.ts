@@ -84,3 +84,61 @@ export function plainText(answer: string): string {
 export function citedPages(answer: string): number[] {
   return [...new Set([...answer.matchAll(CITE)].map((m) => Number(m[1]) - 1))];
 }
+
+// ---------- İstek, sonuç, ücret ----------
+
+export interface AskBase {
+  history: Turn[];
+  ctx: AiContext;
+  question: string;
+  signal: AbortSignal;
+  onText(delta: string): void;
+  /** Cihazdaki model ilk kullanımda indirilip hazırlanırken: 0–1 arası ilerleme. */
+  onProgress?(ratio: number, text: string): void;
+}
+
+export interface Usage {
+  input: number;
+  output: number;
+}
+
+export interface AskResult {
+  text: string;
+  stop: string | null;
+  usage?: Usage;
+}
+
+/** Milyon token başına dolar (giriş, çıkış). Yalnızca fiyatı bilinen modeller; diğerlerinde ücret gösterilmez. */
+const PRICES: Record<string, [number, number]> = {
+  "claude-opus-5-5": [4, 20],
+  "claude-sonnet-5-5": [2, 10],
+  "claude-haiku-5-5": [0.1, 0.5],
+};
+
+export function estimateCost(model: string, u: Usage): number | null {
+  const p = PRICES[model];
+  return p ? (u.input * p[0] + u.output * p[1]) / 1_000_000 : null;
+}
+
+export function formatCost(usd: number): string {
+  if (usd < 0.01) return `<$0,01`;
+  return `$${usd.toFixed(usd < 1 ? 3 : 2).replace(".", ",")}`;
+}
+
+/** Dosya başına saklanan AI turu. */
+export interface SavedTurn extends Turn {
+  label: string;
+  chars: number;
+  at: number;
+  model: string;
+  usage?: Usage;
+}
+
+/** Sohbet Markdown olarak: soru, kapsam, cevap (kaynaklar "(s. N)" olarak). */
+export function chatMarkdown(title: string, turns: SavedTurn[], dateOf: (t: number) => string): string {
+  const out = [`# AI sohbeti — ${title}`, ""];
+  for (const t of turns) {
+    out.push(`## ${t.question.trim()}`, "", `_${t.label} · ${t.model} · ${dateOf(t.at)}_`, "", plainText(t.answer), "");
+  }
+  return out.join("\n").trimEnd() + "\n";
+}

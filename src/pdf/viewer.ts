@@ -71,7 +71,26 @@ export class Viewer {
     stage.addEventListener("wheel", this.onWheel, { passive: false });
     stage.addEventListener("mouseup", this.onMouseUp);
     stage.addEventListener("keyup", this.onKeyUp);
+    stage.addEventListener("pointerdown", this.onSwipeStart);
   }
+
+  /** Sayfa sayfa modda dokunmatik: yatay kaydırma bir sonraki / önceki sayfaya geçer. */
+  private onSwipeStart = (e: PointerEvent) => {
+    if (e.pointerType !== "touch" || this.scrollMode !== "paged") return;
+    const x0 = e.clientX;
+    const y0 = e.clientY;
+    const t0 = performance.now();
+    const up = (ev: PointerEvent) => {
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      if (ev.type === "pointercancel" && Math.abs(ev.clientX - x0) < 1) return;
+      const dx = ev.clientX - x0;
+      const dy = ev.clientY - y0;
+      if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5 && performance.now() - t0 < 800) this.next(dx < 0 ? 1 : -1);
+    };
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  };
 
   /** İlk sayfanın boyutuyla hemen yerleşir, diğer sayfaların gerçek boyutu arkada okunur. */
   async init(highlightsFor: (page: number) => Highlight[], startPage = 0): Promise<void> {
@@ -131,6 +150,7 @@ export class Viewer {
     this.stage.removeEventListener("wheel", this.onWheel);
     this.stage.removeEventListener("mouseup", this.onMouseUp);
     this.stage.removeEventListener("keyup", this.onKeyUp);
+    this.stage.removeEventListener("pointerdown", this.onSwipeStart);
     for (const p of this.pages) this.release(p);
     this.stage.replaceChildren();
   }
@@ -540,6 +560,38 @@ export class Viewer {
     const range = rangeFor(map, at, at + needle.length);
     if (!range) return [];
     return normalizeRects(textRects(range), this.pages[page].el.getBoundingClientRect());
+  }
+
+  /** Sayfadaki bütün eşleşmelerin dikdörtgenleri (en fazla 200). */
+  async findAllRects(page: number, query: string): Promise<Rect[][]> {
+    const text = await this.whenText(page);
+    const { str, map } = layerString(text);
+    const hay = fold(str);
+    const needle = fold(query);
+    const box = this.pages[page].el.getBoundingClientRect();
+    const out: Rect[][] = [];
+    let at = hay.indexOf(needle);
+    while (at >= 0 && needle && out.length < 200) {
+      const range = rangeFor(map, at, at + needle.length);
+      if (range) out.push(normalizeRects(textRects(range), box));
+      at = hay.indexOf(needle, at + needle.length);
+    }
+    return out;
+  }
+
+  /** Sayfadaki tüm arama eşleşmeleri soluk, geçerli olan belirgin. */
+  showSearchHits(page: number, all: Rect[][], current: number): void {
+    for (const p of this.pages) p.search.replaceChildren();
+    const p = this.pages[page];
+    const W = p.w * this.scale;
+    const H = p.h * this.scale;
+    all.forEach((rects, k) => {
+      for (const [x, y, w, hh] of rects) {
+        const r = h("div", { class: k === current ? "cm-searchhit" : "cm-searchhit cm-searchhit--other" });
+        r.style.cssText = `left:${x * W - 2}px;top:${y * H - 2}px;width:${w * W + 4}px;height:${hh * H + 4}px`;
+        p.search.append(r);
+      }
+    });
   }
 
   /** Arama eşleşmesi ya da AI kaynağının dayanak metni (`cite`: noktalı alt çizgi). */

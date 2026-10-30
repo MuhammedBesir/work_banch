@@ -1,6 +1,6 @@
 import type { Mark } from "../types";
 import { h } from "../util";
-import { arrowHead, smoothPath } from "./geometry";
+import { arrowHead, smoothPath, strokeOutline } from "./geometry";
 
 const SVG = "http://www.w3.org/2000/svg";
 
@@ -17,35 +17,35 @@ const strokeStyle = (width: number) => `stroke-width:calc(${width}px * var(--z, 
 
 export interface LayerOptions {
   editable: boolean;
-  selectedId: string | null;
+  selected: ReadonlySet<string>;
+  /** Görüntüleyicinin ölçeği: basınçlı çizginin kalınlığı sayfa birimine çevrilir. */
+  scale: number;
   onSticky?(id: string, collapsed: boolean): void;
 }
 
 /**
- * Bir sayfanın Yaz modu katmanı. Çizimler tek bir SVG'de (viewBox 0–1, ölçekten bağımsız çizgi),
- * metin kutuları ve yapışkan notlar yüzde ile konumlanmış HTML. Zoom'da bozulmaz, yeniden çizilmez.
+ * Kalem ve şekil çizimleri tek bir SVG'de (viewBox 0–1). Basınç kaydı olan kalem çizgisi
+ * kalınlığı boyunca değişen dolu bir şekil, diğerleri ölçekten bağımsız çizgi.
+ * `w`, `h` sayfanın ölçek 1'deki boyutu; küçük sayfa önizlemesi de aynı çizimi kullanır.
  */
-export function renderMarks(pageEl: HTMLElement, page: number, marks: Mark[], o: LayerOptions): HTMLElement {
-  let layer = pageEl.querySelector<HTMLElement>(":scope > .cm-page__marks");
-  if (!layer) {
-    layer = h("div", { class: "cm-page__marks" });
-    pageEl.append(layer);
-  }
-  const aspect = pageEl.clientHeight / Math.max(1, pageEl.clientWidth);
+export function drawingsSvg(marks: Mark[], w: number, h: number, selected: ReadonlySet<string> = new Set()): SVGSVGElement {
   const root = svg("svg", { class: "cm-ink", viewBox: "0 0 1 1", preserveAspectRatio: "none", "aria-hidden": "true" });
-  const frag = document.createDocumentFragment();
-  frag.append(root);
-
+  const aspect = h / Math.max(1, w);
   for (const m of marks) {
-    const selected = o.selectedId === m.id;
+    const sel = selected.has(m.id) ? " is-selected" : "";
     if (m.kind === "ink") {
-      const p = svg("path", { d: smoothPath(m.points), class: `cm-stroke cm-stroke--${m.color}${selected ? " is-selected" : ""}`, "data-id": m.id });
-      p.setAttribute("style", strokeStyle(m.width));
-      root.append(p);
+      if (m.pressures?.length === m.points.length && m.points.length > 1) {
+        const p = svg("path", { d: strokeOutline(m.points, m.pressures, m.width, w, h), class: `cm-stroke cm-stroke--fill cm-stroke--${m.color}${sel}`, "data-id": m.id });
+        root.append(p);
+      } else {
+        const p = svg("path", { d: smoothPath(m.points), class: `cm-stroke cm-stroke--${m.color}${sel}`, "data-id": m.id });
+        p.setAttribute("style", strokeStyle(m.width));
+        root.append(p);
+      }
     } else if (m.kind === "shape") {
       const [x0, y0] = m.from;
       const [x1, y1] = m.to;
-      const g = svg("g", { class: `cm-stroke cm-stroke--${m.color}${selected ? " is-selected" : ""}`, "data-id": m.id });
+      const g = svg("g", { class: `cm-stroke cm-stroke--${m.color}${sel}`, "data-id": m.id });
       g.setAttribute("style", strokeStyle(m.width));
       if (m.shape === "rect") {
         g.append(svg("rect", { x: Math.min(x0, x1), y: Math.min(y0, y1), width: Math.abs(x1 - x0), height: Math.abs(y1 - y0) }));
@@ -56,7 +56,27 @@ export function renderMarks(pageEl: HTMLElement, page: number, marks: Mark[], o:
         g.append(svg("path", { d: `M${x0} ${y0} L${x1} ${y1} M${a[0]} ${a[1]} L${x1} ${y1} L${b[0]} ${b[1]}` }));
       }
       root.append(g);
-    } else if (m.kind === "text") {
+    }
+  }
+  return root;
+}
+
+/**
+ * Bir sayfanın Yaz modu katmanı. Çizimler SVG'de, metin kutuları ve yapışkan notlar
+ * yüzde ile konumlanmış HTML. Zoom'da bozulmaz, yeniden çizilmez.
+ */
+export function renderMarks(pageEl: HTMLElement, page: number, marks: Mark[], o: LayerOptions): HTMLElement {
+  let layer = pageEl.querySelector<HTMLElement>(":scope > .cm-page__marks");
+  if (!layer) {
+    layer = h("div", { class: "cm-page__marks" });
+    pageEl.append(layer);
+  }
+  const frag = document.createDocumentFragment();
+  frag.append(drawingsSvg(marks, pageEl.clientWidth / o.scale, pageEl.clientHeight / o.scale, o.selected));
+
+  for (const m of marks) {
+    const selected = o.selected.has(m.id);
+    if (m.kind === "text") {
       const [x, y, w] = m.box;
       const box = h("div", {
         class: `cm-textbox cm-textbox--${m.color}${selected ? " is-selected" : ""}`,
@@ -66,6 +86,8 @@ export function renderMarks(pageEl: HTMLElement, page: number, marks: Mark[], o:
         text: m.text,
       });
       box.style.cssText = `left:${x * 100}%;top:${y * 100}%;width:${w * 100}%`;
+      // Seçiliyken sağ kenardaki tutamaçla genişlik değişir.
+      if (selected && o.editable) box.append(h("span", { class: "cm-textbox__handle", "data-handle": m.id, "aria-hidden": "true" }));
       frag.append(box);
     } else if (m.kind === "sticky") {
       const [x, y, w] = m.box;
