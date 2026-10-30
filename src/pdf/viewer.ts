@@ -3,6 +3,7 @@ import { pdfjs } from "./load";
 import { fold } from "../format";
 import { normalizeRects } from "../geometry";
 import type { Highlight, Rect, ScrollMode } from "../types";
+import { buildOcrLayer, type OcrPage } from "../ocr/ocr";
 import { h, marker, prefersReducedMotion } from "../util";
 
 export type ZoomMode = "width" | "page" | "custom";
@@ -58,6 +59,8 @@ export class Viewer {
   private resizeObs: ResizeObserver;
   private destroyed = false;
   private highlightsFor: (page: number) => Highlight[] = () => [];
+  /** Metni olmayan (taranmış) sayfa için OCR sonucu; varsa metin katmanı ondan kurulur. */
+  ocrFor: (page: number) => OcrPage | null = () => null;
 
   constructor(
     readonly stage: HTMLElement,
@@ -429,11 +432,23 @@ export class Viewer {
       return;
     }
     if (this.destroyed || p.textLayer !== tl) return;
+    if (!text.textContent?.trim()) {
+      const ocr = this.ocrFor(p.index);
+      if (ocr) buildOcrLayer(text, ocr, vp.width, vp.height);
+    }
     p.text?.remove();
     p.el.append(text);
     p.text = text;
     this.textReady.get(p.index)?.forEach((fn) => fn());
     this.textReady.delete(p.index);
+  }
+
+  /** OCR sonucu geldikten sonra çizili sayfanın metin katmanını yenile. */
+  refreshText(i: number): void {
+    const p = this.pages[i];
+    if (!p?.text || p.text.textContent?.trim() && !p.text.classList.contains("is-ocr")) return;
+    const ocr = this.ocrFor(i);
+    if (ocr) buildOcrLayer(p.text, ocr, p.w * p.renderedScale, p.h * p.renderedScale);
   }
 
   private textReady = new Map<number, (() => void)[]>();

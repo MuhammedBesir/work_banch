@@ -30,10 +30,10 @@ self.addEventListener("fetch", (e) => {
     e.respondWith(fetch(req).catch(() => caches.match("./index.html", { ignoreSearch: true }).then((r) => r || caches.match("./"))));
     return;
   }
-  // Adları içerik özetli dosyalar değişmez: önce önbellek; ilk kez gerekenler (OCR, cihazda model kodu) kullanılınca saklanır.
+  // Adları içerik özetli dosyalar ve OCR verisi değişmez: önce önbellek; ilk kez gerekenler kullanılınca saklanır.
   e.respondWith(
     caches.match(req).then((hit) => hit || fetch(req).then((res) => {
-      if (res.ok && url.pathname.includes("/assets/")) {
+      if (res.ok && (url.pathname.includes("/assets/") || url.pathname.includes("/ocr/"))) {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(req, copy));
       }

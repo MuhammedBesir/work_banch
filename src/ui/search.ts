@@ -29,7 +29,12 @@ export class Search {
   private run = 0;
   private timer = 0;
 
-  constructor(private doc: PDFDocumentProxy, private actions: SearchActions) {
+  constructor(
+    private doc: PDFDocumentProxy,
+    private actions: SearchActions,
+    /** Sayfa metni; taranmış sayfada OCR metnine düşer. */
+    private pageTextOf: (i: number) => Promise<string> = (i) => pageText(doc, i),
+  ) {
     this.texts = new Array(doc.numPages).fill(null);
     this.input = h("input", { class: "cm-input", type: "search", placeholder: "Belgede ara", "aria-label": "Belgede ara" });
     this.count = h("span", { class: "cm-num cm-search__count", "aria-live": "polite" });
@@ -80,9 +85,15 @@ export class Search {
     this.actions.close();
   }
 
+  /** OCR'dan sonra önbelleği boşalt; açık arama yeniden çalışsın. */
+  invalidate(): void {
+    this.texts.fill(null);
+    if (this.isOpen && this.input.value) void this.search(this.input.value);
+  }
+
   private async text(i: number): Promise<string> {
     // Satır sonları boşluk sayılır: kelime iki satıra bölünse de arama bulur.
-    return (this.texts[i] ??= (await pageText(this.doc, i)).replace(/\n/g, " "));
+    return (this.texts[i] ??= (await this.pageTextOf(i)).replace(/\n/g, " "));
   }
 
   private async search(q: string): Promise<void> {

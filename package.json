@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Çalışma Masası: tarayıcıda çalışan PDF okuma, vurgulama ve not alma aracı.",
   "scripts": {
-    "tokens": "node scripts/build-tokens.mjs",
+    "tokens": "node scripts/build-tokens.mjs && node scripts/copy-ocr.mjs",
     "dev": "npm run tokens && vite",
     "build": "npm run tokens && tsc --noEmit && vite build",
     "preview": "vite preview",

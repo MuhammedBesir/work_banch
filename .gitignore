@@ -3,3 +3,4 @@ dist/
 src/styles/tokens.css
 *.log
 .DS_Store
+public/ocr/
