@@ -24,7 +24,19 @@ npm run build
 npm test
 ```
 
-`npm run build` çıktısı (`dist/`) herhangi bir statik sunucudan yayınlanabilir; sunucu tarafı yoktur. Üretim derlemesine sıkı bir CSP eklenir (üçüncü taraf script yok; tek dış bağlantı, AI açıksa Anthropic API), yazı tipleri pakete gömülüdür.
+Uçtan uca testler (Playwright; ilk seferde tarayıcıları indir):
+
+```bash
+npx playwright install
+```
+
+```bash
+npm run e2e
+```
+
+Tek tarayıcı için `npx playwright test --project=chromium` (projeler: `chromium`, `firefox`, `webkit`, `ipad`). GitHub Actions her push'ta birim testleri ve dört tarayıcıyı da çalıştırır.
+
+`npm run build` çıktısı (`dist/`) herhangi bir statik sunucudan yayınlanabilir; sunucu tarafı yoktur. Üretim derlemesine sıkı bir CSP eklenir (üçüncü taraf script yok; dış bağlantılar yalnızca seçilen AI sağlayıcısına ve cihazda model indirmeye), yazı tipleri ve OCR verisi pakete gömülüdür. Uygulama yüklenebilir (PWA) ve çevrimdışı açılır.
 
 ## Oku modu ve v1 kapsamı
 
@@ -35,32 +47,49 @@ npm test
 - **Not** — `N` ya da "Not ekle": panelde o satırın not alanı açılır, otomatik kaydedilir, `Ctrl Enter` kapatır.
 - **İşaretler paneli** — arama, çoklu renk filtresi, sayfaya göre daraltılabilir gruplar, "Sayfayı takip et", sıralama (sayfa/eklenme/renk), `J`/`K`/`Enter`/`E`/`Delete`, 280–480 px sürüklenebilir genişlik. Panelden vurguya atlama: görünürse yalnızca parlama, ±3 sayfaysa yumuşak kaydırma, daha uzaksa anında.
 - **Silme geri alınabilir** — 6 sn "Vurgu silindi · Geri al (`Ctrl Z`)".
-- **Arama** (`Ctrl F`) — sonuçlar sayfa numarasıyla listede, `Enter`/`Shift Enter` gezer.
+- **Arama** (`Ctrl F`) — sonuçlar sayfa numarasıyla listede, `Enter`/`Shift Enter` gezer; sayfadaki bütün eşleşmeler soluk, geçerli olan belirgin.
+- **Sayfalar arası vurgu** — iki sayfaya taşan seçim tek vurgu olur (panelde "s. 3–4").
+- **Sayfa notu** (`Shift N`) — metne bağlı olmayan, sayfaya yapışan not; taranmış sayfalarda da çalışır.
+- **Tarayıcıda OCR** — metni olmayan (taranmış) sayfalar bu cihazda tanınır (tesseract.js, Türkçe + İngilizce, ~5 MB veri ilk kullanımda kendi sunucumuzdan iner). Sonuç dosya başına saklanır; sonra o sayfada seçim, vurgu, arama ve AI çalışır.
+- **Dokunmatik** — sayfa sayfa modda yatay kaydırma sonraki/önceki sayfaya geçer.
 - **İçindekiler ve yer imleri** — sol şeridin ikinci sekmesi; `B` ile sayfaya yer imi.
 - **Kaldığın yer** — dosya içerik özetine (SHA-256) bağlı; yeniden açınca son sayfaya döner. Vurgular dosya adına değil içeriğe bağlıdır.
 - **Odak modu** (`F`), açık/koyu tema (koyu temada sayfa ters çevrilmez, yumuşatılır; "Orijinal" seçeneği var), arayüz yazı boyutu.
-- **Dışa aktar** — Markdown (`<pdf adı>-notlar.md`), renk/düzen/yalnızca-notlu filtreleri ve canlı önizleme. Vurgulu PDF seçeneği Yaz moduyla gelecek; o zamana kadar gizli.
+- **Dışa aktar** — Markdown (`<pdf adı>-notlar.md`), renk/düzen/yalnızca-notlu filtreleri ve canlı önizleme. **Vurgulu PDF**: varsayılan "yassı" (vurgular, çizimler ve metin kutuları sayfaya basılır, her okuyucuda aynı görünür) ya da "düzenlenebilir" (gerçek PDF açıklamaları: Highlight, Ink, Square, Circle, Text).
 - **Yedek** — Ayarlar'dan JSON yedek / geri yükleme, "Tüm verileri sil" (ikinci onayla). İlk vurguda `navigator.storage.persist()` istenir.
 - **Düzenle modu** (`Alt 3`) — sırala (sürükle-bırak ve `Ctrl ↑/↓`), döndür, sil, çoğalt, boş/çizgili/kareli not sayfası ekle, başka PDF ile birleştir, seçili sayfaları ayrı PDF yap. Kayıt her zaman yeni bir kopyaya (pdf-lib, tarayıcıda); vurgular ve yer imleri sayfalarıyla birlikte yeni dosyaya taşınır. İç bağlantı/içindekiler kaybı kaydetmeden önce söylenir.
-- **Sınır durumları** — PDF olmayan dosya, bozuk dosya (ayrıntı katlanmış), parola korumalı dosya (parola yalnızca bellekte), çok büyük dosya (300 MB / 1.500 sayfa üstü açmadan önce sorulur), taranmış PDF (okumayı engellemeyen, gizlenebilir uyarı bandı).
-- **Son açılanlar** — kaldığın sayfa, vurgu sayısı, son açılış. Chromium'da dosya tutamacı saklanır; diğer tarayıcılarda "Dosyayı yeniden seç" (aynı içerik gelince vurgular geri bağlanır).
+- **Sınır durumları** — PDF olmayan dosya, bozuk dosya (ayrıntı katlanmış), parola korumalı dosya (parola yalnızca bellekte), çok büyük dosya (300 MB / 1.500 sayfa üstü açmadan önce sorulur), taranmış PDF (okumayı engellemeyen, gizlenebilir uyarı bandı; "Metni tanıt (OCR)" ve "Sayfaya not ekle").
+- **Son açılanlar** — kaldığın sayfa, vurgu sayısı, son açılış. Chromium'da dosya tutamacı saklanır; Firefox ve Safari'de dosyanın bir kopyası tarayıcının özel deposunda (OPFS, en fazla 200 MB) tutulur ve tek tıkla açılır. Aynı içerik farklı adla açılınca tanınır ("aynı dosya, önceki adı …").
+- **Düzenle modunda** ayrıca kırpma ve not alanı (kenar boşluğu); birleştirilen PDF'in vurguları ve içindekiler ağacı yeni dosyaya taşınır.
 - **Duyarlı düzen** — 1100 px altında panel ve şerit çekmeceye döner, hedefler 44 px olur; 720 px altında alta sabit gezinme (Sayfalar · Vurgular · Ara · Diğer) ve alta sabit seçim çubuğu.
-- **Erişilebilirlik** — her yerde görünür odak halkası, tam klavye, `aria-live` duyuruları ("Önemli olarak vurgulandı, sayfa 112"), `prefers-reduced-motion`'da parlama yerine 1,5 sn sabit çerçeve. Kısayol listesi: `?`.
+- **Erişilebilirlik** — her yerde görünür odak halkası, tam klavye, `aria-live` duyuruları ("Önemli olarak vurgulandı, sayfa 112"), `prefers-reduced-motion`'da parlama yerine 1,5 sn sabit çerçeve. Kısayol listesi: `?`. axe-core ile WCAG 2.1 AA otomatik denetimi e2e testlerinin parçası (giriş, okuyucu, koyu tema, diyaloglar, Yaz ve Tekrar modu, telefon genişliği).
+- **Yedek hatırlatma** — 7 günde bir, vurgu varsa ve yedek alınmadıysa kısa bir bant (3 gün ertelenebilir).
+- **Hata günlüğü** — isteğe bağlı (Ayarlar), yalnızca bu cihazda; dosya adı ve içerik içermez, JSON olarak indirilebilir.
 
 ## Yaz modu (v1.1)
 
 `Alt 2` ya da üst bardaki mod seçici. Araçlar sayfanın solunda yüzen dar bir palette; üst bar ve paneller yerinden oynamaz.
 
 - **Araçlar:** Seç `V`, Vurgu `H` (Oku modundaki metin seçimi), Kalem `P`, Metin kutusu `T`, Yapışkan not `S`, Şekil `R` (dikdörtgen, daire, ok), Silgi `E`. Kalem rengi `Shift 1–3` (siyah, mavi, düzeltme kırmızısı), üç kalınlık. `Ctrl Z` / `Ctrl Shift Z` her işlem için; `Esc` Oku moduna döner.
-- **Çizimler vektör:** sayfaya göre 0–1 koordinatlarla SVG olarak saklanır, zoom'da bozulmaz. Kalemle (stylus) çizerken ortalama basınç çizgi kalınlığına yansır.
+- **Çizimler vektör:** sayfaya göre 0–1 koordinatlarla SVG olarak saklanır, zoom'da bozulmaz. Kalemle (stylus) çizerken basınç çizgi boyunca kalınlığa yansır. `Shift` ile düz çizgi / kare / daire; `Shift`-tık ile çoklu seçim; metin kutusunun sağ kenarındaki tutamaçla genişlik değişir. Çizimler sol şeritteki küçük sayfalarda da görünür. Telefonda palet alta yatay yerleşir.
 - **Avuç reddi:** parmak dokunuşu Yaz modunda da yalnızca sayfayı kaydırır; fare ve kalem çizer.
 - **Silgi** bütün çizgiyi siler (kısmi silme yok). **Seç** aracıyla işaretler sürüklenerek taşınır, `Del` ile silinir; metin kutusu ve nota çift tıklayınca düzenlenir. Boş kalan metin kutusu kendiliğinden silinir. Yapışkan not 16 px'lik köşe işaretine daraltılabilir.
 - **İşaretler paneli** türe göre filtreler (Vurgu / Yazı / Çizim). Kalem çizimleri sayfa başına tek satırdır; el yazısı aranamaz, panel bunu açıkça yazar.
 - Metin kutuları ve notlar **Markdown dışa aktarmaya** girer (isteğe bağlı); tüm işaretler **JSON yedeğe** girer ve **Düzenle modunda** kaydedilen kopyaya sayfalarıyla (döndürmeyle birlikte) taşınır.
 
-## AI yardımcısı (v2, kendi API anahtarınla)
+## Tekrar modu
 
-Varsayılan **kapalı**; kapalıyken AI'a dair hiçbir düğme görünmez. Ayarlar > AI > "AI'yı aç…" ile Anthropic API anahtarını gir ve modeli seç (Claude Opus 5.5 varsayılan; Sonnet 5.5 ve Haiku 5.5 seçilebilir).
+`Alt T` ya da Dışa aktar menüsü. Vurgulardan otomatik kartlar (vurgu ön yüz, notun arka yüz), basitleştirilmiş aralıklı tekrar (Tekrar et / Zor / Kolay; `Space` çevir, `1`–`3` puan). AI açıksa "Kart öner" tanımlardan kart önerir; öneriler onaylanmadan desteye girmez.
+
+## AI yardımcısı (v2)
+
+Varsayılan **kapalı**; kapalıyken AI'a dair hiçbir düğme görünmez. Ayarlar > AI > "AI'yı aç…" ile bir sağlayıcı seç:
+
+- **Bu cihazda** (WebGPU, WebLLM): hiçbir şey dışarı gitmez; ilk kullanımda model indirilir (~1–2 GB).
+- **Yerel sunucu** (Ollama / LM Studio, OpenAI uyumlu `localhost` adresi).
+- **Anthropic** (Claude Opus 5.5 varsayılan; Sonnet 5.5, Haiku 5.5) ya da **OpenAI**, kendi API anahtarınla.
+
+Sohbet geçmişi dosya başına saklanır, Markdown olarak dışa aktarılır; her cevabın altında token sayısı ve tahmini ücret görünür. "Kaynakları vurgula" cevabın dayandığı yerleri seçtiğin renkle vurgular.
 
 - **Sağ panelde bir sekme** (`Ctrl J`), ayrı bir sohbet ekranı değil. Seçim varken yüzen çubukta **Sor** (`A`) seçili metni kapsam yaparak paneli açar.
 - **Kapsam her istekte görünür:** Seçim / Bu sayfa / Bölüm (içindekiler ağacından) / Vurgularım. Sor düğmesinin hemen altında "Gönderilecek: sayfa 112 metni · 1.240 karakter" yazar; "Göster" ile metnin tamamı açılır ve göndermeden kırpılabilir. Dosyanın tamamı asla kendiliğinden gönderilmez; arka planda hiçbir istek yapılmaz. Çok uzun bölüm kırpılmaz, daha dar kapsam seçmen söylenir.
@@ -72,7 +101,7 @@ Varsayılan **kapalı**; kapalıyken AI'a dair hiçbir düğme görünmez. Ayarl
 
 ### Bilerek bu sürümde yok
 
-Sıralama [`docs/ozellikler.md`](docs/ozellikler.md)'deki gibi: **cihazda çalışan model** (WebGPU, ~1,5 GB indirme) ve OCR, vurgulu/işaretli PDF dışa aktarma, **Tekrar modu**, sayfa notu, koyu temada invert, serbest renk, çoklu dosya, hesap/senkronizasyon.
+Koyu temada invert, serbest renk, aynı anda çoklu dosya, hesap/senkronizasyon.
 
 ## Yapı
 
@@ -84,12 +113,18 @@ src/pdf/viewer.ts         sanallaştırılmış görüntüleyici: canvas + vurgu
 src/pdf/load.ts           pdf.js yükleme, parola, taranmış PDF tespiti, içindekiler
 src/editor/               Düzenle modu (ızgara, seçim, sürükle-bırak) ve pdf-lib ile kopya üretimi
 src/write/                Yaz modu: palet ve işaretçi (writeMode), vektör katman (layer), geometri
-src/ai/                   AI: istem, kapsam ve kaynak etiketleri (prompt), Claude API istemcisi (client)
+src/ai/                   AI: istem, kapsam ve kaynak etiketleri (prompt), sağlayıcılar (anthropic, openai, device) ve dağıtıcı (client)
+src/review/               Tekrar modu: aralıklı tekrar (srs) ve ekran
+src/export/pdf.ts         vurgulu / işaretli PDF (yassı ya da açıklama)
+src/ocr/ocr.ts            tarayıcıda OCR ve OCR metin katmanı
+src/app/                  PWA, OPFS kopyaları, yedek hatırlatma, hata günlüğü
 src/ui/                   boş durum, panel, AI paneli, şerit, yüzen çubuk, arama, pencereler, bildirimler
-src/db.ts                 IndexedDB (dosya kayıtları, vurgular, ayarlar)
+src/db.ts                 IndexedDB (dosyalar, vurgular, Yaz modu işaretleri, kartlar, ayarlar ve meta)
 src/markdown.ts           Markdown dışa aktarma
 src/backup.ts             JSON yedek / geri yükleme
 src/styles/components.css tasarım sistemindeki bileşen stilleri (cm-*)
 src/styles/app.css        gerçek uygulama düzeni, sayfa katmanları, duyarlı düzen
-tests/                    vitest: geometri, Yaz modu geometrisi, AI kaynak ayrıştırma, Markdown, biçimlendirme, yedek
+tests/                    vitest: geometri, Yaz modu, AI, Markdown, biçimlendirme, yedek, tekrar, Düzenle modu dönüşümleri
+e2e/                      Playwright: okuma, Yaz, Tekrar, OCR ve axe erişilebilirlik denetimi (4 tarayıcı projesi)
+scripts/                  token üretimi, OCR verisini kopyalama, service worker şablonu
 ```
