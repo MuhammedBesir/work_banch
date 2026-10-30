@@ -43,7 +43,7 @@ export function toMarkdown(list: Highlight[], o: ExportOptions): string {
     return lines.join("\n");
   };
   const writing = (m: Writing, withPage: boolean) => {
-    const kind = m.kind === "text" ? "Metin kutusu" : m.ai ? "AI notu" : "Yapışkan not";
+    const kind = m.kind === "text" ? "Metin kutusu" : m.ai ? "AI notu" : m.pageNote ? "Sayfa notu" : "Yapışkan not";
     const [first, ...rest] = quote(m.text);
     return [`- **[${withPage ? `s. ${m.page + 1} · ` : ""}${kind}]** ${first}`, ...rest.map((l) => `  ${l}`)].join("\n");
   };

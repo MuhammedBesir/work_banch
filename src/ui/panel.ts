@@ -3,6 +3,7 @@ import { readingOrder } from "../geometry";
 import type { Color, Highlight, Mark } from "../types";
 import { COLORS } from "../types";
 import { h, kbd, marker } from "../util";
+import { stickyLabel } from "../write/layer";
 
 export type SortBy = "page" | "time" | "color";
 type Kind = "all" | "hl" | "text" | "draw";
@@ -344,8 +345,8 @@ export class Panel {
     let body: HTMLElement;
     let label: string;
     if (m.kind === "text" || m.kind === "sticky") {
-      label = m.kind === "text" ? "Metin kutusu" : m.ai ? "AI notu" : "Yapışkan not";
-      badge = h("span", { class: `cm-kind${m.kind === "sticky" ? " cm-kind--sticky" : ""}`, text: m.kind === "text" ? "T" : m.ai ? "AI" : "N" });
+      label = m.kind === "text" ? "Metin kutusu" : stickyLabel(m);
+      badge = h("span", { class: `cm-kind${m.kind === "sticky" ? " cm-kind--sticky" : ""}`, text: m.kind === "text" ? "T" : m.ai ? "AI" : m.pageNote ? "S" : "N" });
       body = h("div", {},
         h("div", { class: "cm-item__quote cm-item__quote--plain", text: m.text }),
         h("div", { class: "cm-item__meta" }, h("span", {}, h("span", { class: "cm-num", text: `s. ${num(m.page + 1)}` }), ` · ${label}`),

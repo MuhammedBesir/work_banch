@@ -504,6 +504,8 @@ async function openReader(file: OpenDoc): Promise<void> {
       { label: "Sayfaya yer imi", shortcut: "B", run: () => toggleBookmark() },
       "sep" as const,
     ] : []),
+    { label: "Bu sayfaya not ekle", shortcut: "Shift N", run: () => addPageNote() },
+    "sep",
     { label: "Başka dosya aç", shortcut: "Ctrl O", run: () => void pickFile() },
     { label: "Son açılanlar", run: () => void goHome() },
     "sep",
@@ -546,7 +548,8 @@ async function openReader(file: OpenDoc): Promise<void> {
   // Dışa aktar menüsü: Markdown notları, vurgulu PDF ve Tekrar modu girişi.
   const exportBtn = h("button", { class: "cm-btn cm-btn--sm", "aria-haspopup": "menu" }, "Dışa aktar");
   exportBtn.addEventListener("click", () => openMenu(exportBtn, [
-    { label: "Markdown notları…", hint: ".md", run: () => exportDialog() },
+    { label: "Markdown notları…", hint: ".md", run: () => exportDialog("md") },
+    { label: "Vurgulu PDF…", hint: ".pdf", run: () => exportDialog("pdf") },
     "sep",
     { label: "Tekrar et", shortcut: "Alt T", run: () => openReview() },
   ], "right"));
@@ -777,8 +780,9 @@ function showScannedBand(): void {
       h("span", { class: "cm-notice__sym", "aria-hidden": "true", text: "!" }),
       h("div", {},
         h("p", { class: "cm-notice__title", text: "Bu dosyada seçilebilir metin yok" }),
-        h("p", { class: "cm-notice__text", text: "Taranmış bir belge gibi görünüyor. Okuyabilir ve yer imi ekleyebilirsin, ama metin vurgulama ve arama çalışmaz." }),
+        h("p", { class: "cm-notice__text", text: "Taranmış bir belge gibi görünüyor. Okuyabilir, sayfa notu ve Yaz modu işaretleri ekleyebilirsin; metin vurgulama ve arama için metni tanıt (OCR)." }),
         h("div", { style: "display:flex;gap:8px" },
+          h("button", { class: "cm-btn cm-btn--sm", onclick: () => addPageNote() }, "Sayfaya not ekle"),
           h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm", onclick: () => {
             r.band.replaceChildren();
             r.file.rec.scannedDismissed = true; // dosya başına hatırlanır
@@ -1017,7 +1021,8 @@ function onHighlightClick(id: string): void {
   showFloatFor(hl.page, hl.rects, "applied", hl.color);
 }
 
-async function createFromPending(color: Color): Promise<Highlight[]> {
+/** Bellekteki durum hemen güncellenir; veritabanı yazımı beklenmez (ardından gelen N/C tuşu kaybolmasın). */
+function createFromPending(color: Color): Highlight[] {
   if (!pending || !reader) return [];
   const now = Date.now();
   // Birden fazla sayfaya yayılan seçim: parçalar tek vurgu gibi davranır (aynı grup).
@@ -1033,7 +1038,7 @@ async function createFromPending(color: Color): Promise<Highlight[]> {
   reader.panel.markNew(created[0].id);
   refreshHighlights(created.map((c) => c.page));
   announce(`${settings.names[color]} olarak vurgulandı, sayfa ${created[0].page + 1}`);
-  await db.putHighlights(created);
+  void db.putHighlights(created);
   if (!persistAsked) {
     persistAsked = true;
     void db.requestPersistence();
@@ -1044,7 +1049,7 @@ async function createFromPending(color: Color): Promise<Highlight[]> {
 async function applyColor(color: Color): Promise<void> {
   if (!reader) return;
   if (pending) {
-    const [hl] = await createFromPending(color);
+    const [hl] = createFromPending(color);
     // Araç çubuğu "uygulandı" haline geçer.
     if (hl) {
       activeId = hl.id;
@@ -1070,7 +1075,7 @@ async function applyColor(color: Color): Promise<void> {
 async function noteFromFloat(): Promise<void> {
   if (!reader) return;
   let id = activeId;
-  if (pending) id = (await createFromPending(lastColor))[0]?.id ?? null;
+  if (pending) id = createFromPending(lastColor)[0]?.id ?? null;
   if (!id) return;
   hideFloat();
   if (focusMode) setFocus(false);
@@ -1134,13 +1139,33 @@ function toggleBookmark(): void {
   toast(has ? `Sayfa ${num(p + 1)} yer iminden çıkarıldı` : `Sayfa ${num(p + 1)} yer imlerine eklendi`);
 }
 
-function exportDialog(): void {
+function exportDialog(initial: "md" | "pdf" = "md"): void {
   if (!reader) return;
   if (!highlights.length && !marks.some((m) => (m.kind === "text" || m.kind === "sticky") && m.text.trim())) {
     toast("Dışa aktaracak vurgu ya da not yok. Önce sayfada metni seçip vurgula.");
     return;
   }
-  openExport({ title: reader.file.title, fileName: reader.file.rec.name, highlights, marks, names: settings.names });
+  const r = reader;
+  openExport({
+    title: r.file.title, fileName: r.file.rec.name, highlights, marks, names: settings.names, pageCount: r.viewer.pageCount, initial,
+    pdf: async (choice) => {
+      const { exportAnnotatedPdf } = await import("./export/pdf"); // pdf-lib yalnızca burada yüklenir
+      const out = await exportAnnotatedPdf(r.file.bytes, highlights, marks, { ...choice, names: settings.names });
+      download(`${r.file.rec.name.replace(/\.pdf$/i, "")}-isaretli.pdf`, out, "application/pdf");
+      toast("İşaretli PDF indirildi");
+    },
+  });
+}
+
+/** Sayfa notu: metne bağlı olmayan, doğrudan sayfaya yazılan not (taranmış sayfalarda asıl işe yarar). */
+function addPageNote(page = reader?.viewer.current ?? 0): void {
+  if (!reader) return;
+  const now = Date.now();
+  const existing = (marksByPage.get(page) ?? []).filter((m) => m.kind === "sticky" && m.pageNote).length;
+  const m: Mark = { id: uid(), fileHash: reader.file.rec.hash, page, kind: "sticky", pageNote: true, box: [0.62, Math.min(0.85, 0.03 + existing * 0.12), 0.34, 0.08], text: "", createdAt: now, updatedAt: now };
+  addMark(m);
+  reader.viewer.reveal(page, m.box);
+  requestAnimationFrame(() => reader?.write.edit(m.id, true));
 }
 
 // ---------- AI ----------
@@ -1440,6 +1465,10 @@ document.addEventListener("keydown", (e) => {
       break;
     case "b": case "B":
       toggleBookmark();
+      break;
+    case "N":
+      if (!e.shiftKey) return;
+      addPageNote();
       break;
     case "?":
       openShortcuts();

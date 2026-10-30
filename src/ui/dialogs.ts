@@ -98,19 +98,59 @@ export function openSettings(settings: Settings, a: SettingsActions): void {
 // ---------- Dışa aktar ----------
 
 /** Biçim solda, canlı önizleme sağda. İlk sürümde yalnızca Markdown. */
-export function openExport(o: { title: string; fileName: string; highlights: Highlight[]; marks: Mark[]; names: Record<Color, string> }): void {
+export interface PdfChoice {
+  mode: "flatten" | "annotations";
+  colors: Set<Color>;
+  withNotes: boolean;
+  withWriting: boolean;
+}
+
+/**
+ * Biçim solda, canlı önizleme sağda. Markdown (varsayılan; sınav öncesi toparlamanın asıl ürünü metin)
+ * ya da vurgulu / işaretli PDF.
+ */
+export function openExport(o: {
+  title: string;
+  fileName: string;
+  highlights: Highlight[];
+  marks: Mark[];
+  names: Record<Color, string>;
+  pageCount: number;
+  pdf(choice: PdfChoice): Promise<void>;
+  initial?: "md" | "pdf";
+}): void {
   const d = openDialog({ title: "Dışa aktar", width: 880 });
+  let format: "md" | "pdf" = o.initial ?? "md";
+  let pdfMode: PdfChoice["mode"] = "flatten";
   const colors = new Set<Color>(COLORS);
   let groupBy: "page" | "color" = "page";
   let onlyWithNotes = false;
   let withWriting = true;
+  let withNotes = true;
   const writing = o.marks.filter((m) => (m.kind === "text" || m.kind === "sticky") && m.text.trim()).length;
+  const drawings = o.marks.filter((m) => m.kind === "ink" || m.kind === "shape").length;
   const preview = h("pre", { class: "cm-code", style: "height:400px;overflow:auto", tabindex: "0", "aria-label": "Önizleme" });
   const total = h("span", { class: "cm-num cm-muted" });
   const md = () => toMarkdown(o.highlights, { title: o.title, names: o.names, colors, groupBy, onlyWithNotes, marks: withWriting ? o.marks : [] });
   const update = () => {
-    preview.textContent = md();
-    total.textContent = `${num(selectForExport(o.highlights, { colors, onlyWithNotes }).length)} vurgu`;
+    const n = selectForExport(o.highlights, { colors, onlyWithNotes: format === "md" && onlyWithNotes }).length;
+    total.textContent = `${num(n)} vurgu`;
+    if (format === "md") {
+      preview.textContent = md();
+      return;
+    }
+    const notes = o.highlights.filter((x) => colors.has(x.color) && x.note.trim()).length;
+    preview.textContent = [
+      `${o.fileName.replace(/\.pdf$/i, "")}-isaretli.pdf`,
+      "",
+      `${num(o.pageCount)} sayfa · ${num(n)} vurgu${withNotes ? ` · ${num(notes)} not (açıklama balonu)` : ""}${withWriting ? ` · ${num(drawings)} çizim · ${num(writing)} metin kutusu / not` : ""}`,
+      "",
+      pdfMode === "flatten"
+        ? "Düzleştirilmiş: vurgular, çizimler ve metin kutuları sayfanın parçası olur; Acrobat, Preview ve tarayıcıda aynı görünür, ama sonradan tek tek düzenlenemez. Notlar standart açıklama balonu olarak eklenir."
+        : "Düzenlenebilir işaretler: vurgular, çizimler ve notlar standart PDF açıklamaları olarak eklenir; başka bir okuyucuda düzenlenip silinebilir. Bazı okuyucular (özellikle tarayıcılar) bunları farklı ya da eksik gösterebilir.",
+      "",
+      "Orijinal dosyan değişmez; işaretli kopya ayrı bir dosya olarak indirilir.",
+    ].join("\n");
   };
   const counts = new Map<Color, number>(COLORS.map((c) => [c, o.highlights.filter((x) => x.color === c).length]));
   const check = (label: Node[], on: boolean, onChange: (v: boolean) => void) => {
@@ -118,54 +158,85 @@ export function openExport(o: { title: string; fileName: string; highlights: Hig
     input.addEventListener("change", () => (onChange(input.checked), update()));
     return h("label", { class: "cm-field" }, input, ...label);
   };
-  d.body.style.cssText = "display:grid;grid-template-columns:minmax(0,340px) minmax(0,1fr);gap:24px";
-  d.body.append(
-    h("div", { style: "display:flex;flex-direction:column;gap:16px" },
-      h("div", { class: "cm-option is-on", role: "radio", "aria-checked": "true", tabindex: "0" },
-        h("span", { class: "cm-radio" }),
-        h("div", {},
-          h("div", { style: "font-weight:600" }, "Markdown notları ", h("span", { class: "cm-num cm-muted", text: ".md" })),
-          h("div", { class: "cm-muted", style: "font-size:13px;line-height:18px", text: "Vurgular ve notlar, sayfa numaralarıyla. Obsidian, Notion veya herhangi bir editörde açılır." }),
-        ),
+  const left = h("div", { style: "display:flex;flex-direction:column;gap:16px" });
+  const option = (f: "md" | "pdf", title: string, ext: string, text: string) =>
+    h("button", { class: `cm-option${format === f ? " is-on" : ""}`, role: "radio", "aria-checked": String(format === f), onclick: () => ((format = f), renderLeft(), renderFoot(), update()) },
+      h("span", { class: "cm-radio" }),
+      h("div", {}, h("div", { style: "font-weight:600" }, `${title} `, h("span", { class: "cm-num cm-muted", text: ext })), h("div", { class: "cm-muted", style: "font-size:13px;line-height:18px", text })));
+  const renderLeft = () => {
+    left.replaceChildren(
+      h("div", { role: "radiogroup", "aria-label": "Biçim", style: "display:flex;flex-direction:column;gap:8px" },
+        option("md", "Markdown notları", ".md", "Vurgular ve notlar, sayfa numaralarıyla. Obsidian, Notion veya herhangi bir editörde açılır."),
+        option("pdf", "Vurgulu PDF", ".pdf", "Orijinal dosya + vurgular, çizimler ve notlar. Notlar açıklama balonu olur."),
       ),
       h("div", {}, h("p", { class: "cm-label", text: "Dahil et" }),
         h("div", { style: "display:flex;flex-direction:column;gap:4px" }, ...COLORS.map((c) =>
-          check([marker(c), document.createTextNode(o.names[c]), h("span", { class: "cm-num cm-muted", text: num(counts.get(c)!) })], true, (v) => (v ? colors.add(c) : colors.delete(c))),
+          check([marker(c), document.createTextNode(o.names[c]), h("span", { class: "cm-num cm-muted", text: num(counts.get(c)!) })], colors.has(c), (v) => (v ? colors.add(c) : colors.delete(c))),
         ))),
-      h("div", {}, h("p", { class: "cm-label", text: "Düzen" }),
-        seg("Gruplama", [["page", "Sayfaya göre"], ["color", "Renge göre"]], groupBy, (v) => ((groupBy = v), update()))),
-      check([document.createTextNode("Yalnızca notu olan vurgular")], false, (v) => (onlyWithNotes = v)),
-      writing ? check([document.createTextNode("Metin kutuları ve yapışkan notlar "), h("span", { class: "cm-num cm-muted", text: num(writing) })], true, (v) => (withWriting = v)) : h("span"),
-    ),
-    h("div", { style: "display:flex;flex-direction:column;gap:8px;min-width:0" },
-      h("div", { style: "display:flex;justify-content:space-between" }, h("p", { class: "cm-label", style: "margin:0", text: "Önizleme" }), total),
-      preview,
-    ),
-  );
-  d.foot.append(
-    h("span", { class: "cm-trust", text: "Dosya bu cihazda oluşturulur, hiçbir yere gönderilmez." }),
-    h("div", { style: "display:flex;gap:8px" },
-      h("button", { class: "cm-btn", onclick: async () => {
+      ...(format === "md"
+        ? [
+            h("div", {}, h("p", { class: "cm-label", text: "Düzen" }),
+              seg("Gruplama", [["page", "Sayfaya göre"], ["color", "Renge göre"]], groupBy, (v) => ((groupBy = v), update()))),
+            check([document.createTextNode("Yalnızca notu olan vurgular")], onlyWithNotes, (v) => (onlyWithNotes = v)),
+            writing ? check([document.createTextNode("Metin kutuları ve yapışkan notlar "), h("span", { class: "cm-num cm-muted", text: num(writing) })], withWriting, (v) => (withWriting = v)) : h("span"),
+          ]
+        : [
+            h("div", {}, h("p", { class: "cm-label", text: "İşaretler" }),
+              seg("PDF işaretleri", [["flatten", "Düzleştir"], ["annotations", "Düzenlenebilir"]], pdfMode, (v) => ((pdfMode = v), update()))),
+            check([document.createTextNode("Vurgu notları (açıklama balonu)")], withNotes, (v) => (withNotes = v)),
+            writing + drawings ? check([document.createTextNode("Yaz modu işaretleri "), h("span", { class: "cm-num cm-muted", text: num(writing + drawings) })], withWriting, (v) => (withWriting = v)) : h("span"),
+          ]),
+    );
+  };
+  renderLeft();
+  d.body.style.cssText = "display:grid;grid-template-columns:minmax(0,340px) minmax(0,1fr);gap:24px";
+  d.body.append(left, h("div", { style: "display:flex;flex-direction:column;gap:8px;min-width:0" },
+    h("div", { style: "display:flex;justify-content:space-between" }, h("p", { class: "cm-label", style: "margin:0", text: "Önizleme" }), total),
+    preview,
+  ));
+  const actions = h("div", { style: "display:flex;gap:8px" });
+  const renderFoot = () => {
+    if (format === "md") {
+      actions.replaceChildren(
+        h("button", { class: "cm-btn", onclick: async () => {
+          try {
+            await navigator.clipboard.writeText(md());
+            toast("Panoya kopyalandı");
+          } catch {
+            toast("Panoya kopyalanamadı. İndir düğmesini kullan.");
+          }
+        } }, "Panoya kopyala"),
+        h("button", { class: "cm-btn cm-btn--primary", autofocus: true, onclick: () => {
+          download(exportFileName(o.fileName), md(), "text/markdown;charset=utf-8");
+          d.close();
+        } }, "İndir ", h("span", { class: "cm-num", text: ".md" })),
+      );
+    } else {
+      const btn = h("button", { class: "cm-btn cm-btn--primary", onclick: async () => {
+        btn.disabled = true;
+        btn.textContent = "Hazırlanıyor…";
         try {
-          await navigator.clipboard.writeText(md());
-          toast("Panoya kopyalandı");
-        } catch {
-          toast("Panoya kopyalanamadı. İndir düğmesini kullan.");
+          await o.pdf({ mode: pdfMode, colors: new Set(colors), withNotes, withWriting });
+          d.close();
+        } catch (err) {
+          btn.disabled = false;
+          btn.replaceChildren("İndir ", h("span", { class: "cm-num", text: ".pdf" }));
+          const encrypted = err instanceof Error && /encrypt/i.test(err.message);
+          toast(encrypted ? "Parola korumalı PDF'e işaret eklenemiyor. Parolasız bir kopyayla dene." : "İşaretli PDF oluşturulamadı. Yeniden dene.", undefined, 6000);
         }
-      } }, "Panoya kopyala"),
-      h("button", { class: "cm-btn cm-btn--primary", autofocus: true, onclick: () => {
-        download(exportFileName(o.fileName), md(), "text/markdown;charset=utf-8");
-        d.close();
-      } }, "İndir ", h("span", { class: "cm-num", text: ".md" })),
-    ),
-  );
+      } }, "İndir ", h("span", { class: "cm-num", text: ".pdf" }));
+      actions.replaceChildren(btn);
+    }
+  };
+  renderFoot();
+  d.foot.append(h("span", { class: "cm-trust", text: "Dosya bu cihazda oluşturulur, hiçbir yere gönderilmez." }), actions);
   update();
 }
 
 // ---------- Kısayollar ----------
 
 const SHORTCUTS: [string, [string, string][]][] = [
-  ["Okuma", [["J / →", "Sonraki sayfa"], ["K / ←", "Önceki sayfa"], ["G", "Sayfaya git"], ["Ctrl F", "Ara"], ["F", "Odak modu"], ["[  /  ]", "Sol şerit / sağ panel"], ["Ctrl + / −", "Yakınlaştır / uzaklaştır"], ["Ctrl 0", "Genişliğe sığdır"], ["B", "Sayfaya yer imi"], ["Ctrl O", "Dosya aç"], ["Alt 1 / Alt 2 / Alt 3", "Oku / Yaz / Düzenle modu"], ["Ctrl J", "AI paneli (AI açıksa)"], ["Alt T", "Tekrar modu"]]],
+  ["Okuma", [["J / →", "Sonraki sayfa"], ["K / ←", "Önceki sayfa"], ["G", "Sayfaya git"], ["Ctrl F", "Ara"], ["F", "Odak modu"], ["[  /  ]", "Sol şerit / sağ panel"], ["Ctrl + / −", "Yakınlaştır / uzaklaştır"], ["Ctrl 0", "Genişliğe sığdır"], ["B", "Sayfaya yer imi"], ["Shift N", "Sayfa notu"], ["Ctrl O", "Dosya aç"], ["Alt 1 / Alt 2 / Alt 3", "Oku / Yaz / Düzenle modu"], ["Ctrl J", "AI paneli (AI açıksa)"], ["Alt T", "Tekrar modu"]]],
   ["Seçim varken", [["1 – 4", "Vurgu rengi"], ["N", "Not ekle"], ["C", "Kopyala"], ["A", "AI'ya sor (AI açıksa)"], ["Esc", "Kapat"], ["Ctrl Z", "Silineni geri al"]]],
   ["Tekrar modu", [["Space", "Cevabı göster"], ["1 / 2 / 3", "Bilemedim / Zorlandım / Bildim"], ["G", "Kaynak sayfaya git"], ["E", "Kartı düzenle"], ["Esc", "Belgeye dön"]]],
   ["Yaz modu", [["V", "Seç"], ["H", "Vurgu"], ["P", "Kalem"], ["T", "Metin kutusu"], ["S", "Yapışkan not"], ["R", "Şekil"], ["E", "Silgi"], ["Shift 1 – 3", "Kalem rengi"], ["Ctrl Z / Ctrl Shift Z", "Geri al / yinele"], ["Del", "Seçili işareti sil"], ["Esc", "Oku moduna dön"]]],

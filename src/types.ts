@@ -28,7 +28,7 @@ export type Mark =
   | (MarkBase & { kind: "ink"; color: PenColor; width: number; points: [number, number][]; pressures?: number[] })
   | (MarkBase & { kind: "shape"; color: PenColor; width: number; shape: ShapeKind; from: [number, number]; to: [number, number] })
   | (MarkBase & { kind: "text"; color: PenColor; box: Rect; text: string })
-  | (MarkBase & { kind: "sticky"; box: Rect; text: string; collapsed?: boolean; ai?: boolean });
+  | (MarkBase & { kind: "sticky"; box: Rect; text: string; collapsed?: boolean; ai?: boolean; pageNote?: boolean });
 
 export interface MarkBase {
   id: string;

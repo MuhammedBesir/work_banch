@@ -4,6 +4,9 @@ import { arrowHead, smoothPath, strokeOutline } from "./geometry";
 
 const SVG = "http://www.w3.org/2000/svg";
 
+/** Yapışkan notun türü: AI notu, sayfa notu (metne bağlı olmayan, taranmış sayfalar için) ya da yapışkan not. */
+export const stickyLabel = (m: { ai?: boolean; pageNote?: boolean }) => (m.ai ? "AI notu" : m.pageNote ? "Sayfa notu" : "Yapışkan not");
+
 export const PEN_LABEL = { black: "Siyah", blue: "Mavi", red: "Kırmızı" } as const;
 
 function svg<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number>): SVGElementTagNameMap[K] {
@@ -101,10 +104,10 @@ export function renderMarks(pageEl: HTMLElement, page: number, marks: Mark[], o:
         class: `cm-sticky${m.collapsed ? " is-collapsed" : ""}${selected ? " is-selected" : ""}${m.ai ? " is-ai" : ""}`,
         "data-id": m.id,
         role: "note",
-        "aria-label": `${m.ai ? "AI notu" : "Yapışkan not"}, sayfa ${page + 1}`,
+        "aria-label": `${stickyLabel(m)}, sayfa ${page + 1}`,
       },
         toggle,
-        m.collapsed ? null : h("small", { text: `${m.ai ? "AI notu" : "Yapışkan not"} · s. ${page + 1}` }),
+        m.collapsed ? null : h("small", { text: `${stickyLabel(m)} · s. ${page + 1}` }),
         m.collapsed ? null : h("div", { class: "cm-sticky__text", text: m.text }),
       );
       note.style.cssText = m.collapsed
