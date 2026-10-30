@@ -1,10 +1,10 @@
-import type { FileRecord, Highlight, Mark, Settings } from "./types";
+import type { Card, FileRecord, Highlight, Mark, Settings } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
 
 // Tüm veri bu tarayıcıda, IndexedDB'de yaşar. Hiçbir şey ağa gitmez.
 
 const DB_NAME = "calisma-masasi";
-const VERSION = 2;
+const VERSION = 3;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -22,6 +22,10 @@ function open(): Promise<IDBDatabase> {
       if (e.oldVersion < 2) {
         // Yaz modu işaretleri (v1.1)
         db.createObjectStore("marks", { keyPath: "id" }).createIndex("fileHash", "fileHash");
+      }
+      if (e.oldVersion < 3) {
+        // Tekrar modu kartları ve plan
+        db.createObjectStore("cards", { keyPath: "id" }).createIndex("fileHash", "fileHash");
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -116,6 +120,28 @@ export async function deleteMark(id: string): Promise<void> {
   await wrap((await store("marks", "readwrite")).delete(id));
 }
 
+export async function cardsFor(fileHash: string): Promise<Card[]> {
+  return wrap((await store("cards")).index("fileHash").getAll(fileHash));
+}
+
+export async function allCards(): Promise<Card[]> {
+  return wrap((await store("cards")).getAll());
+}
+
+export async function putCards(list: Card[]): Promise<void> {
+  const tx = (await open()).transaction("cards", "readwrite");
+  const s = tx.objectStore("cards");
+  for (const c of list) s.put(c);
+  await new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+export async function deleteCard(id: string): Promise<void> {
+  await wrap((await store("cards", "readwrite")).delete(id));
+}
+
 /** Küçük yardımcı kayıtlar (AI sohbet geçmişi, hatırlatma zamanları…). */
 export async function getMeta<T>(key: string): Promise<T | undefined> {
   return wrap((await store("meta")).get(key));
@@ -158,7 +184,7 @@ export async function saveSettings(s: Settings): Promise<void> {
 }
 
 export async function clearAll(): Promise<void> {
-  const stores = ["files", "highlights", "marks", "meta"];
+  const stores = ["files", "highlights", "marks", "cards", "meta"];
   const tx = (await open()).transaction(stores, "readwrite");
   for (const name of stores) tx.objectStore(name).clear();
   await new Promise<void>((resolve, reject) => {

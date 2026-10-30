@@ -165,8 +165,9 @@ export function openExport(o: { title: string; fileName: string; highlights: Hig
 // ---------- Kısayollar ----------
 
 const SHORTCUTS: [string, [string, string][]][] = [
-  ["Okuma", [["J / →", "Sonraki sayfa"], ["K / ←", "Önceki sayfa"], ["G", "Sayfaya git"], ["Ctrl F", "Ara"], ["F", "Odak modu"], ["[  /  ]", "Sol şerit / sağ panel"], ["Ctrl + / −", "Yakınlaştır / uzaklaştır"], ["Ctrl 0", "Genişliğe sığdır"], ["B", "Sayfaya yer imi"], ["Ctrl O", "Dosya aç"], ["Alt 1 / Alt 2 / Alt 3", "Oku / Yaz / Düzenle modu"], ["Ctrl J", "AI paneli (AI açıksa)"]]],
+  ["Okuma", [["J / →", "Sonraki sayfa"], ["K / ←", "Önceki sayfa"], ["G", "Sayfaya git"], ["Ctrl F", "Ara"], ["F", "Odak modu"], ["[  /  ]", "Sol şerit / sağ panel"], ["Ctrl + / −", "Yakınlaştır / uzaklaştır"], ["Ctrl 0", "Genişliğe sığdır"], ["B", "Sayfaya yer imi"], ["Ctrl O", "Dosya aç"], ["Alt 1 / Alt 2 / Alt 3", "Oku / Yaz / Düzenle modu"], ["Ctrl J", "AI paneli (AI açıksa)"], ["Alt T", "Tekrar modu"]]],
   ["Seçim varken", [["1 – 4", "Vurgu rengi"], ["N", "Not ekle"], ["C", "Kopyala"], ["A", "AI'ya sor (AI açıksa)"], ["Esc", "Kapat"], ["Ctrl Z", "Silineni geri al"]]],
+  ["Tekrar modu", [["Space", "Cevabı göster"], ["1 / 2 / 3", "Bilemedim / Zorlandım / Bildim"], ["G", "Kaynak sayfaya git"], ["E", "Kartı düzenle"], ["Esc", "Belgeye dön"]]],
   ["Yaz modu", [["V", "Seç"], ["H", "Vurgu"], ["P", "Kalem"], ["T", "Metin kutusu"], ["S", "Yapışkan not"], ["R", "Şekil"], ["E", "Silgi"], ["Shift 1 – 3", "Kalem rengi"], ["Ctrl Z / Ctrl Shift Z", "Geri al / yinele"], ["Del", "Seçili işareti sil"], ["Esc", "Oku moduna dön"]]],
   ["İşaretler paneli", [["J / K", "Satır gez"], ["Enter", "Vurguya atla"], ["E", "Notu düzenle"], ["Delete", "Sil"], ["Ctrl Enter", "Notu kapat"]]],
   ["Düzenle modu", [["Oklar", "Gez"], ["Space", "Seç"], ["Shift + ok", "Aralık seç"], ["Ctrl ↑ / ↓", "Seçileni taşı"], ["R", "Döndür"], ["Ctrl D", "Çoğalt"], ["Del", "Sil"], ["Ctrl Z", "Geri al"]]],

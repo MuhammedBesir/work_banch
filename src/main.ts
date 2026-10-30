@@ -18,7 +18,7 @@ import { looksLikePdf, looksScanned, loadOutline, OpenError, openPdf, pageText, 
 import { Viewer, type SelectionPart } from "./pdf/viewer";
 import { PageEditor, type EditPage } from "./editor/pageEditor";
 import { chatMarkdown, type AiContext, type Cite, type SavedTurn } from "./ai/prompt";
-import type { AiSettings, Color, FileRecord, Highlight, Mark, Settings } from "./types";
+import type { AiSettings, Card, Color, FileRecord, Highlight, Mark, Settings } from "./types";
 import { COLORS } from "./types";
 import { announce, download, h, isTyping, kbd, sha256, uid } from "./util";
 import { confirmDialog } from "./ui/dialog";
@@ -27,6 +27,8 @@ import { askPassword, BIG_BYTES, BIG_PAGES, confirmBigFile, openAiSetup, openExp
 import { markBox, rotateMark } from "./write/geometry";
 import { renderMarks } from "./write/layer";
 import { WriteMode } from "./write/writeMode";
+import { ReviewScreen } from "./review/review";
+import { freshSchedule, parseSuggestions } from "./review/srs";
 import { FloatBar } from "./ui/float";
 import { Home, type RecentRow } from "./ui/home";
 import { openMenu } from "./ui/menu";
@@ -96,6 +98,8 @@ let panelOpen = true;
 let focusMode = false;
 let persistAsked = false;
 let marks: Mark[] = [];
+let cards: Card[] = [];
+let review: ReviewScreen | null = null;
 let marksByPage = new Map<number, Mark[]>();
 let rightTab: "marks" | "ai" = "marks";
 /** Son metin seçimi: AI'nın "Seçim" kapsamı için (Sor düğmesine basınca seçim kaybolsa da kalır). */
@@ -203,6 +207,7 @@ function pickBackup(): void {
       if (reader) {
         await reloadHighlights();
         marks = await db.marksFor(reader.file.rec.hash);
+        cards = await db.cardsFor(reader.file.rec.hash);
         refreshMarks();
       }
       else await showHome();
@@ -456,6 +461,8 @@ async function reloadHighlights(): Promise<void> {
 
 function closeReader(): void {
   if (!reader) return;
+  review?.el.remove();
+  review = null;
   reader.editor?.destroy();
   reader.write.disable();
   reader.viewer.destroy();
@@ -464,6 +471,7 @@ function closeReader(): void {
   reader = null;
   highlights = [];
   marks = [];
+  cards = [];
   lastSelection = null;
   pending = null;
   activeId = null;
@@ -476,6 +484,7 @@ async function openReader(file: OpenDoc): Promise<void> {
   home = null;
   highlights = await db.highlightsFor(file.rec.hash);
   marks = await db.marksFor(file.rec.hash);
+  cards = await db.cardsFor(file.rec.hash);
   indexHighlights();
   indexMarks();
   rightTab = "marks";
@@ -490,6 +499,7 @@ async function openReader(file: OpenDoc): Promise<void> {
   const fileMenu = (anchor: HTMLElement, mobile = false) => openMenu(anchor, [
     ...(mobile ? [
       { label: "Dışa aktar", run: () => exportDialog() },
+      { label: "Tekrar et", shortcut: "Alt T", run: () => openReview() },
       { label: resolvedTheme() === "dark" ? "Açık tema" : "Koyu tema", run: () => void changeSettings({ ...settings, theme: resolvedTheme() === "dark" ? "light" : "dark" }) },
       { label: "Sayfaya yer imi", shortcut: "B", run: () => toggleBookmark() },
       "sep" as const,
@@ -533,6 +543,13 @@ async function openReader(file: OpenDoc): Promise<void> {
     if (panelOpen && rightTab !== "marks") showRightTab("marks");
     else togglePanel();
   } }, h("span", { class: "cm-num", text: num(highlights.length) }));
+  // Dışa aktar menüsü: Markdown notları, vurgulu PDF ve Tekrar modu girişi.
+  const exportBtn = h("button", { class: "cm-btn cm-btn--sm", "aria-haspopup": "menu" }, "Dışa aktar");
+  exportBtn.addEventListener("click", () => openMenu(exportBtn, [
+    { label: "Markdown notları…", hint: ".md", run: () => exportDialog() },
+    "sep",
+    { label: "Tekrar et", shortcut: "Alt T", run: () => openReview() },
+  ], "right"));
   const aiBtn = ghost("AI", { title: "AI paneli (Ctrl J)", "aria-pressed": "false", onclick: () => toggleAi() });
   const sep = () => h("span", { class: "cm-bar__sep" });
 
@@ -558,7 +575,7 @@ async function openReader(file: OpenDoc): Promise<void> {
       ghost("Ara ", { onclick: () => search.open(window.getSelection()?.toString().trim() || undefined) }, kbd("Ctrl F")),
       themeBtn,
       ghost("Odak ", { class: "cm-btn cm-btn--ghost cm-btn--sm is-wide", onclick: () => setFocus(!focusMode) }, kbd("F")),
-      h("button", { class: "cm-btn cm-btn--sm", onclick: () => exportDialog() }, "Dışa aktar"),
+      exportBtn,
       sep(),
       panelBtn,
       aiBtn,
@@ -672,6 +689,7 @@ async function openReader(file: OpenDoc): Promise<void> {
     saveHistory: (turns) => void db.putMeta(`ai:${file.rec.hash}`, turns),
     exportChat: (turns) => download(`${file.rec.name.replace(/\.pdf$/i, "")}-ai-sohbet.md`, chatMarkdown(file.title, turns, dateLong), "text/markdown;charset=utf-8"),
     highlightCites: (cites, color) => highlightCites(cites, color),
+    suggestCards: (text) => suggestCards(text),
     colorName: (c) => settings.names[c],
   });
   ai.el.hidden = true;
@@ -902,6 +920,7 @@ async function onEditorSaved(out: Uint8Array, name: string, pages: EditPage[], s
   const hash = await sha256(out.slice().buffer as ArrayBuffer);
   const moved: Highlight[] = [];
   const movedMarks: Mark[] = [];
+  const newHlIds = new Map<string, string>();
   const bookmarks: number[] = [];
   // Birleştirilen PDF'ler daha önce açılıp vurgulandıysa onların işaretleri de taşınır.
   const other = new Map<string, { hl: Highlight[]; marks: Mark[] }>();
@@ -919,15 +938,28 @@ async function onEditorSaved(out: Uint8Array, name: string, pages: EditPage[], s
     }
     if (p.src !== "main") return;
     for (const hl of byPage.get(p.index) ?? []) {
-      moved.push({ ...hl, id: uid(), fileHash: hash, page: newIndex, rects: hl.rects.map((r) => rotateRect(r, p.rotation)), updatedAt: Date.now() });
+      const id = uid();
+      if (!newHlIds.has(hl.id)) newHlIds.set(hl.id, id);
+      moved.push({ ...hl, id, fileHash: hash, page: newIndex, rects: hl.rects.map((r) => rotateRect(r, p.rotation)), updatedAt: Date.now() });
     }
     for (const m of marksByPage.get(p.index) ?? []) {
       movedMarks.push({ ...rotateMark(m, p.rotation), id: uid(), fileHash: hash, page: newIndex, updatedAt: Date.now() });
     }
     if (reader!.file.rec.bookmarks.includes(p.index)) bookmarks.push(newIndex);
   });
+  // Tekrar kartları da sayfalarıyla taşınır (vurgu kartları yeni vurguya bağlanır).
+  const movedCards: Card[] = [];
+  pages.forEach((p, newIndex) => {
+    if (p.src !== "main") return;
+    for (const c of cards.filter((x) => x.page === p.index && x.status === "active")) {
+      const hlId = c.highlightId ? newHlIds.get(c.highlightId) : undefined;
+      if (c.highlightId && !hlId) continue;
+      movedCards.push({ ...c, id: hlId ? `hl-${hlId}` : uid(), fileHash: hash, page: newIndex, highlightId: hlId, updatedAt: Date.now() });
+    }
+  });
   await db.putHighlights(moved);
   await db.putMarks(movedMarks);
+  await db.putCards(movedCards);
   await db.putFile({ hash, name, size: out.byteLength, pageCount: pages.length, lastPage: 0, lastOpened: Date.now() - 1, bookmarks });
   download(name, out, "application/pdf");
   toast(`Kopya kaydedildi: ${name}${moved.length ? ` · ${num(moved.length)} vurgu taşındı` : ""}`, {
@@ -1190,6 +1222,10 @@ async function aiContext(scope: Scope): Promise<AiContext | { error: string }> {
       const list = highlights.filter((x) => x.color === 4);
       return hlPages(list, `${num(list.length)} "${settings.names[4]}" vurgusu`);
     }
+    case "hl24": {
+      const list = highlights.filter((x) => x.color === 2 || x.color === 4);
+      return hlPages(list, `${num(list.length)} "${settings.names[2]}" ve "${settings.names[4]}" vurgusu`);
+    }
   }
 }
 
@@ -1216,6 +1252,64 @@ async function jumpCite(c: Cite): Promise<void> {
   } else if (c.quote) {
     toast(`Alıntı sayfa ${num(c.page + 1)}'de birebir bulunamadı; kaynağı kendin kontrol et.`, undefined, 4000);
   }
+}
+
+// ---------- Tekrar modu ----------
+
+/** Tam ekran tekrar: araç çubuğu tek satır; sayfa, zoom ve konum değişmez, çıkınca okumaya dönülür. */
+function openReview(): void {
+  if (!reader || review || reader.editor) return;
+  const r = reader;
+  hideFloat();
+  if (focusMode) setFocus(false);
+  const screen = new ReviewScreen(r.file.title, settings.names, cards, highlights, {
+    save: (list) => {
+      for (const c of list) if (!cards.includes(c)) cards.push(c);
+      void db.putCards(list);
+    },
+    remove: (id) => {
+      cards = cards.filter((c) => c.id !== id);
+      void db.deleteCard(id);
+    },
+    source: (c) => {
+      closeReview();
+      const hl = c.highlightId ? highlights.find((x) => x.id === c.highlightId) : undefined;
+      r.viewer.reveal(c.page, hl?.rects[0], hl?.id);
+    },
+    exit: () => closeReview(),
+  });
+  review = screen;
+  r.root.classList.add("is-review");
+  r.body.hidden = true;
+  r.root.insertBefore(screen.el, r.body.nextSibling);
+  screen.focus();
+  announce("Tekrar modu");
+}
+
+function closeReview(): void {
+  if (!review || !reader) return;
+  review.el.remove();
+  review = null;
+  reader.root.classList.remove("is-review");
+  reader.body.hidden = false;
+  reader.viewer.scheduleRender(0);
+  reader.stage.focus({ preventScroll: true });
+}
+
+/** AI'nın kart önerileri "önerilen" olarak saklanır; Tekrar modunda onaylanmadan desteye girmez. */
+function suggestCards(text: string): number {
+  if (!reader) return 0;
+  const now = Date.now();
+  const found = parseSuggestions(text);
+  const list: Card[] = found.map((s) => ({
+    id: uid(), fileHash: reader!.file.rec.hash, page: Math.min(Math.max(0, s.page ?? reader!.viewer.current), reader!.viewer.pageCount - 1),
+    source: "ai", front: s.front, back: s.back, status: "suggested", ...freshSchedule(now), createdAt: now, updatedAt: now,
+  }));
+  if (!list.length) return 0;
+  cards.push(...list);
+  void db.putCards(list);
+  toast(`${num(list.length)} kart önerisi Tekrar modunda onayını bekliyor`, { label: "Aç", run: () => openReview() }, 8000);
+  return list.length;
 }
 
 /** Cevaptaki kaynakların dayanak metnini vurgula (açık bir tıkla, seçilen renkle). */
@@ -1266,6 +1360,12 @@ document.addEventListener("keydown", (e) => {
   if (e.altKey && !ctrl && /^Digit[123]$/.test(e.code)) {
     e.preventDefault();
     void setMode((["read", "write", "edit"] as const)[Number(e.code.slice(5)) - 1]);
+    return;
+  }
+  if (review) return; // Tekrar modu kendi kısayollarını işler
+  if (e.altKey && !ctrl && e.code === "KeyT") {
+    e.preventDefault();
+    openReview();
     return;
   }
   if (r.editor) {

@@ -1,5 +1,5 @@
 import * as db from "./db";
-import type { FileRecord, Highlight, Mark, Settings } from "./types";
+import type { Card, FileRecord, Highlight, Mark, Settings } from "./types";
 
 // JSON yedek: vurgular, notlar, Yaz modu işaretleri, yer imleri, kaldığın yer ve ayarlar.
 // Dosyaların kendisi ve AI API anahtarı yedeğe girmez.
@@ -12,10 +12,11 @@ export interface Backup {
   files: Omit<FileRecord, "handle">[];
   highlights: Highlight[];
   marks?: Mark[];
+  cards?: Card[];
 }
 
 export async function createBackup(): Promise<Backup> {
-  const [settings, files, highlights, marks] = await Promise.all([db.loadSettings(), db.allFiles(), db.allHighlights(), db.allMarks()]);
+  const [settings, files, highlights, marks, cards] = await Promise.all([db.loadSettings(), db.allFiles(), db.allHighlights(), db.allMarks(), db.allCards()]);
   return {
     app: "calisma-masasi",
     version: 1,
@@ -24,6 +25,7 @@ export async function createBackup(): Promise<Backup> {
     files: files.map(({ handle: _h, ...rest }) => rest),
     highlights,
     marks,
+    cards,
   };
 }
 
@@ -49,6 +51,7 @@ export async function restoreBackup(b: Backup): Promise<{ highlights: number; fi
   }
   await db.putHighlights(b.highlights);
   await db.putMarks(b.marks ?? []);
+  await db.putCards(b.cards ?? []);
   if (b.settings) {
     // Yedekte anahtar yok: bu tarayıcıdaki anahtar korunur.
     const current = await db.loadSettings();

@@ -190,6 +190,25 @@ button.cm-bar__file { display: block; line-height: 26px; text-align: left; }
 .cm-option:disabled { opacity: .55; cursor: not-allowed; }
 .cm-citehit { position: absolute; border-bottom: 2px dotted var(--ai-cite); background: color-mix(in srgb, var(--selection) 55%, transparent); border-radius: 2px; }
 
+/* ---------- Tekrar modu ---------- */
+.cm-app.is-review { grid-template-rows: minmax(0, 1fr); }
+.cm-app.is-review > .cm-bar, .cm-app.is-review > .cm-band, .cm-app.is-review > .cm-mnav { display: none; }
+.cm-review-screen { display: grid; grid-template-rows: var(--toolbar-height) 1fr; min-height: 0; grid-column: 1 / -1; }
+.cm-review-screen .cm-bar { zoom: var(--ui-zoom); }
+.cm-review { overflow-y: auto; display: flex; flex-direction: column; align-items: center; justify-content: safe center; gap: 20px; padding: var(--space-6) var(--space-4) 40px; }
+.cm-review .cm-card, .cm-review .cm-grade, .cm-review .cm-progress { width: min(640px, 100%); }
+.cm-review .cm-card { min-height: 300px; outline: none; }
+.cm-card .cm-mk--1 { background: var(--sheet-mark-1); } .cm-card .cm-mk--2 { background: var(--sheet-mark-2); }
+.cm-card .cm-mk--3 { background: var(--sheet-mark-3); } .cm-card .cm-mk--4 { background: var(--sheet-mark-4); }
+.cm-card .cm-kind { color: #57524a; border-color: #cfc8ba; }
+.cm-card__edit { font: 400 15px/22px var(--font-serif); resize: vertical; min-height: 0; padding: 8px 10px; background: #fff; color: var(--sheet-ink); border-color: #857d6f; }
+.cm-grade button:disabled { opacity: .5; }
+.cm-suggest__list { width: min(720px, 100%); display: flex; flex-direction: column; gap: var(--space-4); align-self: stretch; margin: 0 auto; }
+.cm-suggest { background: var(--surface-raised); border: 1px solid var(--line-strong); border-radius: var(--radius-lg); padding: var(--space-4); display: flex; flex-direction: column; gap: 8px; }
+.cm-suggest .cm-card__src { color: var(--ink-muted); }
+.cm-suggest .cm-card__edit { background: var(--surface-raised); color: var(--ink); border-color: var(--control-border); }
+@media (max-width: 720px) { .cm-review-screen .cm-chips { display: none; } }
+
 /* ---------- uyarı bandı ---------- */
 .cm-band { grid-column: 1 / -1; }
 .cm-band .cm-notice { border-radius: 0; }

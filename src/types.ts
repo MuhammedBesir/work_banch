@@ -38,6 +38,28 @@ export interface MarkBase {
   updatedAt: number;
 }
 
+/** Tekrar modu kartı. Vurgu kartları kendiliğinden oluşur; AI kartları onaylanmadan desteye girmez. */
+export interface Card {
+  id: string;
+  fileHash: string;
+  page: number;
+  source: "highlight" | "ai";
+  highlightId?: string;
+  color?: Color;
+  front: string;
+  back: string;
+  note?: string;
+  status: "active" | "suggested";
+  due: number;
+  /** Gün. */
+  interval: number;
+  ease: number;
+  reps: number;
+  lapses: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export type ScrollMode = "continuous" | "paged";
 
 export interface FileRecord {

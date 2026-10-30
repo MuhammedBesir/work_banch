@@ -7,7 +7,7 @@ import { h, kbd, marker } from "../util";
 import { openMenu } from "./menu";
 import { toast } from "./toast";
 
-export type Scope = "selection" | "page" | "section" | "highlights" | "hl2" | "hl4";
+export type Scope = "selection" | "page" | "section" | "highlights" | "hl2" | "hl4" | "hl24";
 
 export interface AiActions {
   settings(): AiSettings;
@@ -26,7 +26,14 @@ export interface AiActions {
   /** Cevaptaki kaynakların dayanak metnini seçilen renkle vurgula; kaç vurgu eklendiğini döndürür. */
   highlightCites(cites: Cite[], color: Color): Promise<number>;
   colorName(c: Color): string;
+  /** Cevaptaki kart önerilerini onay bekleyen kart olarak kaydet; kaç kart çıktığını döndürür. */
+  suggestCards(text: string): number;
 }
+
+const CARD_PROMPT = `İşaretlediğim yerlerden tekrar kartı öner. En fazla 8 kart.
+Her kartı tam olarak şu biçimde yaz, kartlar arasında boş satır bırak, başka hiçbir şey yazma:
+S: kısa ve tek bir şey soran soru
+C: kısa cevap [s. SAYFA: "alıntı"]`;
 
 /** Cihazdaki küçük modelin bağlam penceresi dar: kapsam bundan uzunsa gönderilmez, söylenir. */
 const DEVICE_MAX_CHARS = 6000;
@@ -200,6 +207,7 @@ export class AiPanel {
       chip([document.createTextNode("Sınav sorusu üret")], "page", "Bu sayfadan 3 sınav sorusu üret. Her birinin altına kısa cevabını ve kaynağını yaz."),
       chip([marker(4), document.createTextNode(" Tanımları açıkla "), h("span", { class: "cm-num", text: num(c.hl4) })], "hl4",
         "\"Tanım\" olarak işaretlediğim tanımları kendi cümlelerinle, birer örnekle açıkla.", c.hl4 === 0),
+      chip([document.createTextNode("Kart öner "), h("span", { class: "cm-num", text: num(c.hl2 + c.hl4) })], "hl24", CARD_PROMPT, c.hl2 + c.hl4 === 0),
     );
   }
 
@@ -346,6 +354,10 @@ export class AiPanel {
           this.spentEl.textContent = this.spent ? `Oturum: ${formatCost(this.spent)}` : "";
         }
         turn.append(this.usageLine(model, res.usage), this.answerActions(res.text, question, scope));
+        if (question === CARD_PROMPT) {
+          const n = this.actions.suggestCards(res.text);
+          if (!n) answer.append(h("p", { class: "cm-muted", text: "Cevapta kart biçimi bulunamadı; yeniden üretmeyi dene." }));
+        }
         if (res.stop === "max_tokens") answer.append(h("p", { class: "cm-muted", text: "Cevap uzunluk sınırında kesildi." }));
       }
     } catch (err) {
