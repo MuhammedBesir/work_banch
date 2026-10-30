@@ -1,4 +1,7 @@
 /// <reference types="vitest" />
+import { createHash } from "node:crypto";
+import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { join, relative } from "node:path";
 import { defineConfig, type Plugin } from "vite";
 
 // Üretim derlemesinde sıkı CSP: üçüncü taraf script yok; dış bağlantılar yalnızca AI için (aşağıda).
@@ -27,9 +30,34 @@ const csp: Plugin = {
   },
 };
 
+// Çevrimdışı çalışma: derlenen uygulama dosyalarının listesiyle service worker üretir.
+// 2 MB'tan büyük, isteğe bağlı parçalar (OCR, cihazda model) önceden indirilmez; ilk kullanımda saklanır.
+const sw: Plugin = {
+  name: "sw",
+  apply: "build",
+  closeBundle() {
+    const out = "dist";
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const f of readdirSync(dir)) {
+        const p = join(dir, f);
+        if (statSync(p).isDirectory()) walk(p);
+        // .woff2 yeterli; eski .woff kopyaları ve yalnızca AI açıkken gereken sağlayıcı SDK'ları ilk kullanımda saklanır.
+        else if (statSync(p).size < 2 * 1024 * 1024 && !/\.(map|woff)$/.test(f) && !/^(anthropic|openai)-/.test(f) && f !== "sw.js") files.push(relative(out, p).split("\\").join("/"));
+      }
+    };
+    walk(out);
+    const list = ["./", ...files.map((f) => `./${f}`)].sort();
+    const version = createHash("sha256").update(list.join("\n")).update(readFileSync(join(out, "index.html"))).digest("hex").slice(0, 12);
+    const tpl = readFileSync("scripts/sw-template.js", "utf8");
+    writeFileSync(join(out, "sw.js"), tpl.replace("__VERSION__", version).replace("__PRECACHE__", JSON.stringify(list, null, 2)));
+  },
+};
+
 export default defineConfig({
   base: "./",
-  plugins: [csp],
+  define: { __APP_VERSION__: JSON.stringify(process.env.npm_package_version ?? "dev") },
+  plugins: [csp, sw],
   build: { target: "es2022" },
   test: { environment: "node" },
 });

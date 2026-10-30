@@ -133,6 +133,8 @@ export interface Settings {
   panelOpen: boolean;
   ai: AiSettings;
   pen: { color: PenColor; width: number };
+  /** İsteğe bağlı yerel hata günlüğü (hiçbir yere gönderilmez). */
+  errorLog: boolean;
 }
 
 export const DEFAULT_NAMES: Record<Color, string> = {
@@ -157,4 +159,5 @@ export const DEFAULT_SETTINGS: Settings = {
     localUrl: "http://localhost:11434/v1",
   },
   pen: { color: "blue", width: 2 },
+  errorLog: false,
 };

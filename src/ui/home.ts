@@ -30,6 +30,7 @@ export class Home {
   private drop: HTMLElement;
   private dropSlot: HTMLElement;
   private recent: HTMLElement;
+  private notice = h("div", { style: "display:contents" });
 
   constructor(private actions: HomeActions) {
     this.drop = h("section", { class: "cm-drop", "aria-label": "PDF aç" });
@@ -40,7 +41,7 @@ export class Home {
       h("span", { class: "cm-bar__spacer" }),
       h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm", onclick: () => actions.settings() }, "Ayarlar"),
     );
-    this.el = h("div", { class: "cm-app" }, bar, h("div"), h("main", { class: "cm-home" }, this.dropSlot, this.recent));
+    this.el = h("div", { class: "cm-app" }, bar, h("div"), h("main", { class: "cm-home" }, this.dropSlot, this.notice, this.recent));
     this.showIdle();
   }
 
@@ -101,6 +102,11 @@ export class Home {
         ),
       ),
     );
+  }
+
+  /** Yedek hatırlatması gibi engellemeyen bildirimler. */
+  setNotice(el: HTMLElement | null): void {
+    this.notice.replaceChildren(...(el ? [el] : []));
   }
 
   renderRecent(rows: RecentRow[]): void {

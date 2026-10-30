@@ -27,6 +27,9 @@ export interface SettingsActions {
   wipe(): void;
   shortcuts(): void;
   ai(): void;
+  install(): void;
+  installed: boolean;
+  errors: { view(): void; download(): void; clear(): void };
 }
 
 /** Renk adları, tema, koyu temada PDF, arayüz yazı boyutu ve veri yedeği. */
@@ -76,6 +79,27 @@ export function openSettings(settings: Settings, a: SettingsActions): void {
           : "Kapalı. Kapalıyken AI'a dair hiçbir düğme görünmez." }),
         h("button", { class: "cm-btn cm-btn--sm", onclick: () => (d.close(), a.ai()) }, s.ai.mode !== "off" ? "AI ayarları…" : "AI'yı aç…"),
       ),
+    ),
+    h("section", { style: "display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:24px" },
+      h("div", {}, h("p", { class: "cm-label", text: "Uygulama" }),
+        h("div", { style: "display:flex;flex-direction:column;gap:8px;align-items:flex-start" },
+          a.installed
+            ? h("span", { text: "Uygulama olarak kurulu. İnternet olmadan da açılır." })
+            : h("button", { class: "cm-btn cm-btn--sm", onclick: () => a.install() }, "Uygulama olarak kur"),
+          help("Bir kez açıldıktan sonra internetsiz çalışır. Kurulunca PDF'leri bilgisayarındaki \"Birlikte aç\" menüsünden açabilirsin."),
+        )),
+      h("div", {}, h("p", { class: "cm-label", text: "Hata günlüğü" }),
+        (() => {
+          const input = h("input", { type: "checkbox", checked: s.errorLog });
+          input.addEventListener("change", () => set("errorLog")(input.checked));
+          return h("label", { class: "cm-field" }, input, "Hataları bu tarayıcıda kaydet");
+        })(),
+        help("Hiçbir yere gönderilmez. Bir sorun bildirirken indirip paylaşabilirsin; dosya adları ve PDF metni kaydedilmez."),
+        h("div", { style: "display:flex;gap:8px;margin-top:8px;flex-wrap:wrap" },
+          h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm", onclick: () => a.errors.view() }, "Görüntüle"),
+          h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm", onclick: () => a.errors.download() }, "İndir (.json)"),
+          h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--danger", onclick: () => a.errors.clear() }, "Temizle"),
+        )),
     ),
     h("section", { style: "display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:24px" },
       h("div", {}, h("p", { class: "cm-label", text: "Arayüz yazı boyutu" }),

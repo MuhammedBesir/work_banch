@@ -12,7 +12,7 @@ import "./styles/app.css";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import * as db from "./db";
 import { createBackup, parseBackup, restoreBackup } from "./backup";
-import { dateLong, num, percent } from "./format";
+import { dateLong, num, percent, relative } from "./format";
 import { readingOrder, rotateRect } from "./geometry";
 import { looksLikePdf, looksScanned, loadOutline, OpenError, openPdf, pageText, type OutlineItem } from "./pdf/load";
 import { Viewer, type SelectionPart } from "./pdf/viewer";
@@ -36,6 +36,10 @@ import { Panel } from "./ui/panel";
 import { Rail } from "./ui/rail";
 import { Search } from "./ui/search";
 import { toast } from "./ui/toast";
+import { canInstall, install, isInstalled, registerPwa } from "./app/pwa";
+import { clearErrors, installErrorLog, readErrors, setErrorLog } from "./app/errors";
+import { backupDue, markBackedUp, snoozeBackup } from "./app/backupReminder";
+import { openDialog } from "./ui/dialog";
 
 type FsHandle = FileSystemFileHandle & {
   queryPermission?(o: { mode: "read" }): Promise<PermissionState>;
@@ -117,6 +121,7 @@ function applySettings(): void {
   root.dataset.theme = resolvedTheme();
   root.dataset.pdfDark = settings.pdfDark;
   root.dataset.uiSize = settings.uiSize;
+  setErrorLog(settings.errorLog);
   if (reader) {
     reader.body.style.setProperty("--panel-width", `${settings.panelWidth}px`);
     reader.themeBtn.textContent = resolvedTheme() === "dark" ? "Açık tema" : "Koyu tema";
@@ -137,16 +142,53 @@ function settingsDialog(): void {
   openSettings(settings, {
     change: (s) => void changeSettings(s),
     counts: () => Object.fromEntries(COLORS.map((c) => [c, highlights.filter((x) => x.color === c).length])) as Record<Color, number>,
-    backup: async () => {
-      const b = await createBackup();
-      download(`calisma-masasi-yedek-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(b, null, 2), "application/json");
-      toast(`${num(b.highlights.length)} vurgu yedeklendi`);
-    },
+    backup: () => void backupNow(),
     restore: () => pickBackup(),
     wipe: () => void wipeAll(),
     shortcuts: openShortcuts,
     ai: aiSetup,
+    install: () => void install(),
+    installed: isInstalled() && !canInstall(),
+    errors: {
+      view: async () => {
+        const list = await readErrors();
+        const d = openDialog({ title: "Hata günlüğü", width: 720 });
+        d.body.append(list.length
+          ? h("pre", { class: "cm-code", style: "max-height:420px;overflow:auto", text: list.map((e) => `${new Date(e.at).toLocaleString("tr-TR")} · ${e.kind} · v${e.version}\n${e.message}${e.stack ? `\n${e.stack}` : ""}`).join("\n\n") })
+          : h("p", { style: "margin:0", text: settings.errorLog ? "Kayıtlı hata yok." : "Günlük kapalı. Açınca bundan sonraki hatalar bu tarayıcıda kaydedilir." }));
+      },
+      download: async () => download(`calisma-masasi-hatalar-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(await readErrors(), null, 2), "application/json"),
+      clear: async () => (await clearErrors(), toast("Hata günlüğü temizlendi")),
+    },
   });
+}
+
+/** JSON yedek: indirilir ve son yedek zamanı hatırlanır (hatırlatma için). */
+async function backupNow(): Promise<void> {
+  const b = await createBackup();
+  download(`calisma-masasi-yedek-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(b, null, 2), "application/json");
+  await markBackedUp();
+  toast(`${num(b.highlights.length)} vurgu, ${num(b.marks?.length ?? 0)} işaret ve ${num(b.cards?.length ?? 0)} kart yedeklendi`);
+  if (home) void refreshRecent();
+}
+
+/** Düzenli yedek hatırlatması: okumayı engellemez, ertelenebilir. */
+async function backupNotice(): Promise<HTMLElement | null> {
+  const total = (await db.allHighlights()).length + (await db.allMarks()).length;
+  const { due, lastAt } = await backupDue(total);
+  if (!due) return null;
+  const box = h("div", { class: "cm-notice cm-notice--warn", role: "status" },
+    h("span", { class: "cm-notice__sym", "aria-hidden": "true", text: "!" }),
+    h("div", {},
+      h("p", { class: "cm-notice__title", text: lastAt ? `Son yedeğin ${relative(lastAt)} alındı` : "Henüz yedek almadın" }),
+      h("p", { class: "cm-notice__text", text: `${num(total)} vurgu ve işaret yalnızca bu tarayıcıda. Tarayıcı verisi silinirse ya da bilgisayar değişirse kaybolur.` }),
+      h("div", { style: "display:flex;gap:8px" },
+        h("button", { class: "cm-btn cm-btn--sm", onclick: () => void backupNow().then(() => box.remove()) }, "Şimdi yedekle (.json)"),
+        h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm", onclick: () => void snoozeBackup().then(() => box.remove()) }, "3 gün sonra hatırlat"),
+      ),
+    ),
+  );
+  return box;
 }
 
 function aiSetup(): void {
@@ -359,6 +401,7 @@ async function refreshRecent(): Promise<void> {
     reachable: !!rec.handle,
   })));
   home?.renderRecent(rows);
+  home?.setNotice(await backupNotice());
 }
 
 // ---------- Okuyucu ----------
@@ -1537,8 +1580,13 @@ matchMedia("(max-width: 1100px)").addEventListener("change", () => updateLayout(
 // ---------- Başlangıç ----------
 
 async function boot(): Promise<void> {
+  installErrorLog();
   settings = await db.loadSettings();
   applySettings();
+  registerPwa((files, handles) => {
+    const f = files.find((x) => /\.pdf$/i.test(x.name) || x.type === "application/pdf");
+    if (f) void openFile(f, handles[files.indexOf(f)] as FsHandle);
+  });
   await showHome();
 }
 
