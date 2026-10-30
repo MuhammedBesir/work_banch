@@ -663,7 +663,7 @@ async function openReader(file: OpenDoc): Promise<void> {
     ),
   );
 
-  const stage = h("div", { class: "cm-stage", tabindex: "-1", "aria-label": "Belge" });
+  const stage = h("div", { class: "cm-stage", tabindex: "0", "aria-label": "Belge" });
   const pageFlag = h("div", { class: "cm-pageflag cm-num", "aria-hidden": "true" });
   const stageWrap = h("main", { class: "cm-stagewrap", "aria-label": file.rec.name }, stage, pageFlag);
   const band = h("div", { class: "cm-band" });

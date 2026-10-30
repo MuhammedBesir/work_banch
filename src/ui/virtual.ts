@@ -110,7 +110,11 @@ export class VirtualList {
       this.bottom.style.height = `${this.offsets[this.items.length] - this.offsets[to + 1]}px`;
     }
     this.host.scrollTop = scroll;
-    if (focusKey && !this.host.contains(document.activeElement)) this.nodes.get(focusKey)?.focus({ preventScroll: true });
+    if (focusKey && !this.host.contains(document.activeElement)) {
+      const node = this.nodes.get(focusKey);
+      const target = node?.matches("button, [tabindex]") ? node : node?.querySelector<HTMLElement>("button, [tabindex]");
+      target?.focus({ preventScroll: true });
+    }
   }
 
   /** Öğeyi listenin başına getir; ölçülen yükseklikler tahmini değiştirirse konumu bir kez daha düzelt. */

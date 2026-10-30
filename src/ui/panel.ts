@@ -95,10 +95,17 @@ export class Panel {
     this.returnBar = h("div", { class: "cm-panel__follow", hidden: true },
       h("button", { class: "cm-btn cm-btn--sm", onclick: () => this.resumeFollow() }, "Okuduğum sayfaya dön"),
     );
-    const resize = h("div", { class: "cm-panel__resize", role: "separator", "aria-orientation": "vertical", "aria-label": "Panel genişliği", tabindex: "0" });
+    const resize = h("div", {
+      class: "cm-panel__resize", role: "separator", "aria-orientation": "vertical", "aria-label": "Panel genişliği", tabindex: "0",
+      "aria-valuemin": "280", "aria-valuemax": "480", "aria-valuenow": "340",
+    });
     this.bindResize(resize);
     const foot = h("div", { class: "cm-panel__foot" }, h("span", { class: "cm-trust", text: "Bu cihazda saklanıyor" }), h("span", {}, kbd("J"), " ", kbd("K"), " gez · ", kbd("Enter"), " atla"));
     this.el = h("aside", { class: "cm-panel", "aria-label": "Vurgular ve notlar" }, resize, head, this.list, this.returnBar, foot);
+    new ResizeObserver(() => {
+      const w = Math.round(this.el.getBoundingClientRect().width);
+      if (w) resize.setAttribute("aria-valuenow", String(Math.min(480, Math.max(280, w))));
+    }).observe(this.el);
   }
 
   setData(items: Highlight[], names: Record<Color, string>, marks: Mark[] = this.marks): void {
@@ -283,12 +290,14 @@ export class Panel {
 
     if (!this.items.length && !writeCount) {
       this.vlist.setItems([]);
+      this.list.removeAttribute("role"); // boş durum bir liste değil
       this.list.replaceChildren(this.tutorial());
       return;
     }
     const rows = this.rows();
     if (!rows.length) {
       this.vlist.setItems([]);
+      this.list.removeAttribute("role");
       const reason = this.query.trim() ? `"${this.query.trim()}" için işaret ya da not bulunamadı.` : "Bu filtrede işaret yok.";
       this.list.replaceChildren(
         h("div", { class: "cm-panel__empty" },
@@ -315,6 +324,7 @@ export class Panel {
       const estimate = r.type === "hl" ? (r.it.note.trim() ? 140 : 100) : 90;
       items.push({ key: id, estimate, build: () => (r.type === "hl" ? this.itemRow(r.it) : this.markRow(r)) });
     }
+    this.list.setAttribute("role", "list");
     this.list.scrollTop = scroll;
     this.vlist.setItems(items);
     this.newId = null;
@@ -346,7 +356,8 @@ export class Panel {
       h("span", {}, h("span", { class: "cm-num", text: label }), marks),
       h("span", { class: "cm-num", text: num(members.length) }),
     );
-    return btn;
+    // Liste yalnızca liste öğesi içerebilir: başlık düğmesi bir öğenin içinde.
+    return h("div", { role: "listitem", class: "cm-group__item" }, btn);
   }
 
   /** Yaz modu satırı: metin kutusu (T), yapışkan not (N), AI notu ya da sayfanın çizimleri. */

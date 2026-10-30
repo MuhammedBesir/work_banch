@@ -59,5 +59,5 @@ export default defineConfig({
   define: { __APP_VERSION__: JSON.stringify(process.env.npm_package_version ?? "dev") },
   plugins: [csp, sw],
   build: { target: "es2022" },
-  test: { environment: "node" },
+  test: { environment: "node", include: ["tests/**/*.test.ts"] },
 });
