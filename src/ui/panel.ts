@@ -4,6 +4,7 @@ import type { Color, Highlight, Mark } from "../types";
 import { COLORS } from "../types";
 import { h, kbd, marker } from "../util";
 import { stickyLabel } from "../write/layer";
+import { VirtualList, type VItem } from "./virtual";
 
 export type SortBy = "page" | "time" | "color";
 type Kind = "all" | "hl" | "text" | "draw";
@@ -47,6 +48,9 @@ export class Panel {
   private programmaticScroll = false;
   private followBtn: HTMLButtonElement;
   private returnBar: HTMLElement;
+  /** Yalnızca görünen satırlar DOM'da: 200+ vurguda da panel hızlı kalır. */
+  private vlist: VirtualList;
+  private headPages: [number, string][] = [];
 
   constructor(names: Record<Color, string>, private actions: PanelActions) {
     this.names = names;
@@ -79,6 +83,7 @@ export class Panel {
     );
     this.list = h("div", { class: "cm-list", role: "list", tabindex: "-1" });
     this.list.addEventListener("keydown", this.onListKey);
+    this.vlist = new VirtualList(this.list);
     this.list.addEventListener("scroll", () => {
       if (this.programmaticScroll) return;
       if (this.follow && !this.followPaused) {
@@ -113,9 +118,16 @@ export class Panel {
     this.selectedId = id;
     this.list.querySelectorAll(".cm-item.is-selected").forEach((x) => x.classList.remove("is-selected"));
     if (!id) return;
-    const row = this.row(id);
+    const row = scroll ? this.reveal(id) : this.row(id);
     row?.classList.add("is-selected");
-    if (scroll && row) this.scrollIntoView(row);
+  }
+
+  /** Satırı görünür alana getir (sanal listede henüz çizilmemiş olabilir). */
+  private reveal(id: string): HTMLElement | null {
+    this.programmaticScroll = true;
+    const el = this.vlist.reveal(id);
+    requestAnimationFrame(() => (this.programmaticScroll = false));
+    return el;
   }
 
   /** Bir vurgunun not alanını odaklı açar; sayfa yerinden oynamaz. */
@@ -131,27 +143,25 @@ export class Panel {
     this.editingId = id;
     this.selectedId = id;
     this.render();
-    const box = this.list.querySelector<HTMLTextAreaElement>(`.cm-item[data-id="${CSS.escape(id)}"] textarea`);
+    const box = this.reveal(id)?.querySelector<HTMLTextAreaElement>("textarea");
     if (box) {
-      this.scrollIntoView(box.closest(".cm-item")!);
       box.focus({ preventScroll: true });
       box.setSelectionRange(box.value.length, box.value.length);
     }
   }
 
   focusList(): void {
-    const row = (this.selectedId && this.row(this.selectedId)) || this.list.querySelector<HTMLElement>(".cm-item");
-    row?.focus();
+    const key = (this.selectedId && this.vlist.offsetOf(this.selectedId) !== null ? this.selectedId : null) ?? this.vlist.firstKey(isRowKey);
+    if (key) this.reveal(key)?.focus();
   }
 
   pageChanged(page: number): void {
     this.currentPage = page;
     if (!this.follow || this.followPaused || this.sort !== "page") return;
-    const groups = [...this.list.querySelectorAll<HTMLElement>(".cm-group__head")];
-    const target = groups.filter((g) => Number(g.dataset.page) <= page).at(-1);
+    const target = this.headPages.filter(([p]) => p <= page).at(-1);
     if (target) {
       this.programmaticScroll = true;
-      this.list.scrollTop = target.offsetTop;
+      this.vlist.scrollToStart(target[1]);
       requestAnimationFrame(() => (this.programmaticScroll = false));
     }
   }
@@ -173,12 +183,6 @@ export class Panel {
 
   private row(id: string): HTMLElement | null {
     return this.list.querySelector<HTMLElement>(`.cm-item[data-id="${CSS.escape(id)}"]`);
-  }
-
-  private scrollIntoView(el: HTMLElement): void {
-    this.programmaticScroll = true;
-    el.scrollIntoView({ block: "nearest" });
-    requestAnimationFrame(() => (this.programmaticScroll = false));
   }
 
   private visible(): Highlight[] {
@@ -278,11 +282,13 @@ export class Panel {
     const scroll = this.list.scrollTop;
 
     if (!this.items.length && !writeCount) {
+      this.vlist.setItems([]);
       this.list.replaceChildren(this.tutorial());
       return;
     }
     const rows = this.rows();
     if (!rows.length) {
+      this.vlist.setItems([]);
       const reason = this.query.trim() ? `"${this.query.trim()}" için işaret ya da not bulunamadı.` : "Bu filtrede işaret yok.";
       this.list.replaceChildren(
         h("div", { class: "cm-panel__empty" },
@@ -293,19 +299,24 @@ export class Panel {
       return;
     }
 
-    const frag = document.createDocumentFragment();
+    const items: VItem[] = [];
+    this.headPages = [];
     let lastKey = "";
     for (const r of rows) {
       const key = rowKey(this.sort, r);
       if (this.sort !== "time" && key !== lastKey) {
         lastKey = key;
-        frag.append(this.groupHead(key, r, rows.filter((x) => rowKey(this.sort, x) === key)));
+        const members = rows.filter((x) => rowKey(this.sort, x) === key);
+        items.push({ key: `h:${key}`, estimate: 33, build: () => this.groupHead(key, r, members) });
+        this.headPages.push([r.page, `h:${key}`]);
       }
       if (this.sort !== "time" && this.collapsed.has(key)) continue;
-      frag.append(r.type === "hl" ? this.itemRow(r.it) : this.markRow(r));
+      const id = r.type === "hl" ? r.it.id : r.id;
+      const estimate = r.type === "hl" ? (r.it.note.trim() ? 140 : 100) : 90;
+      items.push({ key: id, estimate, build: () => (r.type === "hl" ? this.itemRow(r.it) : this.markRow(r)) });
     }
-    this.list.replaceChildren(frag);
     this.list.scrollTop = scroll;
+    this.vlist.setItems(items);
     this.newId = null;
   }
 
@@ -448,13 +459,20 @@ export class Panel {
 
   private onListKey = (e: KeyboardEvent) => {
     if ((e.target as HTMLElement).tagName === "TEXTAREA") return;
-    const rows = [...this.list.querySelectorAll<HTMLElement>(".cm-item")];
     const cur = (e.target as HTMLElement).closest<HTMLElement>(".cm-item");
-    const i = cur ? rows.indexOf(cur) : -1;
     const id = cur?.dataset.id;
     const key = e.key.toLowerCase();
-    if (key === "j" || e.key === "ArrowDown") rows[Math.min(rows.length - 1, i + 1)]?.focus();
-    else if (key === "k" || e.key === "ArrowUp") rows[Math.max(0, i - 1)]?.focus();
+    // Sanal liste: komşu satır henüz çizilmemiş olabilir; önce görünür alana getirilir.
+    const go = (dir: 1 | -1) => {
+      const next = id ? this.vlist.neighbor(id, dir, isRowKey) : this.vlist.firstKey(isRowKey);
+      if (next) this.reveal(next)?.focus();
+    };
+    const focusAfterRemove = () => {
+      const next = id && (this.vlist.neighbor(id, 1, isRowKey) ?? this.vlist.neighbor(id, -1, isRowKey));
+      if (next) requestAnimationFrame(() => this.reveal(next)?.focus());
+    };
+    if (key === "j" || e.key === "ArrowDown") go(1);
+    else if (key === "k" || e.key === "ArrowUp") go(-1);
     else if (cur?.dataset.mark && id) {
       // Yaz modu satırı: Enter atlar, E düzenler, Delete siler (çizim satırı yalnızca atlar).
       const mark = this.marks.find((m) => m.id === id) ?? this.marks.find((m) => `draw-${m.page}` === id);
@@ -462,7 +480,7 @@ export class Panel {
       if (e.key === "Enter") (this.select(id, false), this.actions.jumpMark(mark));
       else if (key === "e" && mark.id === id) this.actions.editMark(mark);
       else if ((e.key === "Delete" || e.key === "Backspace") && mark.id === id) {
-        (rows[i + 1] ?? rows[i - 1])?.focus();
+        focusAfterRemove();
         this.actions.removeMark(id);
       } else return;
     } else if (e.key === "Enter" && id) {
@@ -470,7 +488,7 @@ export class Panel {
       if (it) (this.select(id, false), this.actions.jump(it));
     } else if (key === "e" && id) this.editNote(id);
     else if ((e.key === "Delete" || e.key === "Backspace") && id) {
-      (rows[i + 1] ?? rows[i - 1])?.focus();
+      focusAfterRemove();
       this.actions.remove(id);
     } else return;
     e.preventDefault();
@@ -522,6 +540,8 @@ export class Panel {
   }
 }
 
+/** Grup başlıkları seçilemez; yalnızca satırlar klavyeyle gezilir. */
+const isRowKey = (k: string) => !k.startsWith("h:");
 const groupKey = (sort: SortBy, it: Highlight) => (sort === "color" ? `c${it.color}` : `p${it.page}`);
 const rowKey = (sort: SortBy, r: Row) => (sort === "color" ? (r.type === "hl" ? `c${r.it.color}` : "c9") : `p${r.page}`);
 const boxY = (m: Mark) => (m.kind === "ink" ? Math.min(...m.points.map((p) => p[1])) : m.kind === "shape" ? Math.min(m.from[1], m.to[1]) : m.box[1]);

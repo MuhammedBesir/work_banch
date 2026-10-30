@@ -13,18 +13,19 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import * as db from "./db";
 import { createBackup, parseBackup, restoreBackup } from "./backup";
 import { dateLong, num, percent, relative } from "./format";
-import { readingOrder, rotateRect } from "./geometry";
+import { readingOrder } from "./geometry";
+import { editMark, editRect } from "./editor/transform";
 import { looksLikePdf, looksScanned, loadOutline, OpenError, openPdf, pageText, type OutlineItem } from "./pdf/load";
 import { Viewer, type SelectionPart } from "./pdf/viewer";
 import { PageEditor, type EditPage } from "./editor/pageEditor";
 import { chatMarkdown, type AiContext, type Cite, type SavedTurn } from "./ai/prompt";
-import type { AiSettings, Card, Color, FileRecord, Highlight, Mark, Settings } from "./types";
+import type { AiSettings, Card, Color, FileRecord, Highlight, Mark, Rect, Settings } from "./types";
 import { COLORS } from "./types";
 import { announce, download, h, isTyping, kbd, sha256, uid } from "./util";
 import { confirmDialog } from "./ui/dialog";
 import { AiPanel, type Scope } from "./ui/ai";
 import { askPassword, BIG_BYTES, BIG_PAGES, confirmBigFile, openAiSetup, openExport, openSettings, openShortcuts } from "./ui/dialogs";
-import { markBox, rotateMark } from "./write/geometry";
+import { markBox } from "./write/geometry";
 import { renderMarks } from "./write/layer";
 import { WriteMode } from "./write/writeMode";
 import { ReviewScreen } from "./review/review";
@@ -39,6 +40,8 @@ import { toast } from "./ui/toast";
 import { canInstall, install, isInstalled, registerPwa } from "./app/pwa";
 import { clearErrors, installErrorLog, readErrors, setErrorLog } from "./app/errors";
 import { backupDue, markBackedUp, snoozeBackup } from "./app/backupReminder";
+import { copiesUsage, deleteAllCopies, hasCopy, opfsSupported, readCopy, saveCopy } from "./app/opfs";
+import { bytes as fmtBytes } from "./format";
 import { openDialog } from "./ui/dialog";
 
 type FsHandle = FileSystemFileHandle & {
@@ -149,6 +152,17 @@ function settingsDialog(): void {
     ai: aiSetup,
     install: () => void install(),
     installed: isInstalled() && !canInstall(),
+    copies: {
+      usage: async () => {
+        const u = await copiesUsage();
+        return u.count ? `${num(u.count)} PDF kopyası · ${fmtBytes(u.bytes)}` : "";
+      },
+      clear: async () => {
+        await deleteAllCopies();
+        toast("Tarayıcıdaki PDF kopyaları silindi; vurguların duruyor");
+        if (home) void refreshRecent();
+      },
+    },
     errors: {
       view: async () => {
         const list = await readErrors();
@@ -271,6 +285,7 @@ async function wipeAll(): Promise<void> {
   });
   if (!ok) return;
   await db.clearAll();
+  await deleteAllCopies();
   settings = await db.loadSettings();
   applySettings();
   closeReader();
@@ -351,6 +366,8 @@ async function openFile(file: File, handle?: FsHandle): Promise<void> {
     aliases: [...new Set([...(existing?.aliases ?? []), ...(existing && existing.name !== file.name ? [existing.name] : [])])].filter((n) => n !== file.name),
   };
   await db.putFile(rec);
+  // Tutamaç saklanamayan tarayıcılarda (Firefox, Safari) son açılanlardan yeniden açmak için kopya.
+  if (!rec.handle && opfsSupported()) void saveCopy(hash, bytes);
   if (existing && existing.name !== file.name) {
     const n = await db.countHighlights(hash);
     toast(`Bu dosyayı daha önce „${existing.name}" adıyla açmıştın${n ? `; ${num(n)} vurgun geri geldi` : ""}.`, undefined, 6000);
@@ -370,8 +387,13 @@ async function openRecent(row: RecentRow): Promise<void> {
         return;
       }
     } catch {
-      /* erişim kaybolmuş: yeniden seçtir */
+      /* erişim kaybolmuş: tarayıcıdaki kopyaya ya da yeniden seçmeye düş */
     }
+  }
+  const copy = await readCopy(row.rec.hash, row.rec.name);
+  if (copy) {
+    await openFile(copy);
+    return;
   }
   await pickFile();
 }
@@ -384,6 +406,7 @@ async function showHome(): Promise<void> {
     openRecent: (row) => void openRecent(row),
     clearRecent: async () => {
       for (const f of await db.allFiles()) await db.deleteFile(f.hash);
+      await deleteAllCopies();
       await refreshRecent();
     },
     settings: settingsDialog,
@@ -398,7 +421,7 @@ async function refreshRecent(): Promise<void> {
   const rows: RecentRow[] = await Promise.all(files.map(async (rec) => ({
     rec,
     highlights: await db.countHighlights(rec.hash),
-    reachable: !!rec.handle,
+    reachable: !!rec.handle || await hasCopy(rec.hash),
   })));
   home?.renderRecent(rows);
   home?.setNotice(await backupNotice());
@@ -940,6 +963,7 @@ async function setMode(mode: Mode): Promise<void> {
     const editor = new PageEditor(
       { id: "main", name: r.file.rec.name, bytes: r.file.bytes, doc: r.file.doc },
       { saved: (out, name, pages, hashes) => void onEditorSaved(out, name, pages, hashes), askPassword: (n, w) => askPassword(n, w) },
+      r.outline,
     );
     r.editor = editor;
     r.body.hidden = true;
@@ -976,21 +1000,27 @@ async function onEditorSaved(out: Uint8Array, name: string, pages: EditPage[], s
     if (p.src && p.src !== "main") {
       const src = other.get(p.src);
       for (const hl of src?.hl.filter((x) => x.page === p.index) ?? []) {
-        moved.push({ ...hl, id: uid(), fileHash: hash, page: newIndex, rects: hl.rects.map((r) => rotateRect(r, p.rotation)), updatedAt: Date.now() });
+        const rects = hl.rects.map((r) => editRect(r, p)).filter((r): r is Rect => !!r);
+        if (rects.length) moved.push({ ...hl, id: uid(), fileHash: hash, page: newIndex, rects, updatedAt: Date.now() });
       }
       for (const m of src?.marks.filter((x) => x.page === p.index) ?? []) {
-        movedMarks.push({ ...rotateMark(m, p.rotation), id: uid(), fileHash: hash, page: newIndex, updatedAt: Date.now() });
+        const em = editMark(m, p);
+        if (em) movedMarks.push({ ...em, id: uid(), fileHash: hash, page: newIndex, updatedAt: Date.now() });
       }
       return;
     }
     if (p.src !== "main") return;
+    // Döndürme, kırpma ve not alanı: vurgu ve işaretler yeni sayfadaki yerlerine; kırpılan alandakiler düşer.
     for (const hl of byPage.get(p.index) ?? []) {
+      const rects = hl.rects.map((r) => editRect(r, p)).filter((r): r is Rect => !!r);
+      if (!rects.length) continue;
       const id = uid();
       if (!newHlIds.has(hl.id)) newHlIds.set(hl.id, id);
-      moved.push({ ...hl, id, fileHash: hash, page: newIndex, rects: hl.rects.map((r) => rotateRect(r, p.rotation)), updatedAt: Date.now() });
+      moved.push({ ...hl, id, fileHash: hash, page: newIndex, rects, updatedAt: Date.now() });
     }
     for (const m of marksByPage.get(p.index) ?? []) {
-      movedMarks.push({ ...rotateMark(m, p.rotation), id: uid(), fileHash: hash, page: newIndex, updatedAt: Date.now() });
+      const em = editMark(m, p);
+      if (em) movedMarks.push({ ...em, id: uid(), fileHash: hash, page: newIndex, updatedAt: Date.now() });
     }
     if (reader!.file.rec.bookmarks.includes(p.index)) bookmarks.push(newIndex);
   });

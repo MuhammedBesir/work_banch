@@ -20,6 +20,7 @@ export function registerPwa(onFiles: (files: File[], handles: FileSystemFileHand
   });
 
   if (!import.meta.env.PROD || !("serviceWorker" in navigator)) return;
+  const hadController = !!navigator.serviceWorker.controller;
   const register = async () => {
     try {
       const reg = await navigator.serviceWorker.register("./sw.js", { scope: "./" });
@@ -32,7 +33,8 @@ export function registerPwa(onFiles: (files: File[], handles: FileSystemFileHand
           if (w.state === "installed" && navigator.serviceWorker.controller) offerUpdate(w);
         });
       });
-      let reloaded = false;
+      // İlk kurulumda (önceden denetleyen yokken) devralma sayfayı yenilemez; yalnızca güncelleme yeniler.
+      let reloaded = !hadController;
       navigator.serviceWorker.addEventListener("controllerchange", () => {
         if (reloaded) return;
         reloaded = true;

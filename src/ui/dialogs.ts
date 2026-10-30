@@ -29,12 +29,19 @@ export interface SettingsActions {
   ai(): void;
   install(): void;
   installed: boolean;
+  /** Firefox/Safari: son açılanlar için tarayıcıda tutulan PDF kopyaları. */
+  copies: { usage(): Promise<string>; clear(): void };
   errors: { view(): void; download(): void; clear(): void };
 }
 
 /** Renk adları, tema, koyu temada PDF, arayüz yazı boyutu ve veri yedeği. */
 export function openSettings(settings: Settings, a: SettingsActions): void {
   const s: Settings = { ...settings, names: { ...settings.names } };
+  const copiesLine = h("div", { class: "cm-muted", style: "font-size:13px;line-height:18px" });
+  void a.copies.usage().then((u) => {
+    if (!u) return;
+    copiesLine.replaceChildren(`Son açılanlar için saklanan: ${u} `, h("button", { class: "cm-linkbtn", onclick: () => (a.copies.clear(), copiesLine.replaceChildren()) }, "Sil"));
+  });
   const d = openDialog({ title: "Ayarlar", width: 760 });
   const counts = a.counts();
   const rows = COLORS.map((c) => {
@@ -110,6 +117,7 @@ export function openSettings(settings: Settings, a: SettingsActions): void {
           h("button", { class: "cm-btn cm-btn--sm", onclick: a.backup }, "Tüm vurguları yedekle (.json)"),
           h("button", { class: "cm-btn cm-btn--sm", onclick: a.restore }, "Yedekten geri yükle"),
           h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--danger", onclick: () => (d.close(), a.wipe()) }, "Bu tarayıcıdaki tüm verileri sil…"),
+          copiesLine,
         )),
     ),
   );

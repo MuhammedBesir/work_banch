@@ -4,7 +4,9 @@ import { openPdf } from "../pdf/load";
 import { h, isTyping, kbd, sha256 } from "../util";
 import { openMenu } from "../ui/menu";
 import { toast } from "../ui/toast";
-import type { EditPage, Source } from "./build";
+import type { EditPage, OutlineNode, Source } from "./build";
+import { openDialog } from "../ui/dialog";
+import type { Rect } from "../types";
 
 export type { EditPage, Source };
 
@@ -43,7 +45,7 @@ export class PageEditor {
   private dragKeys: string[] = [];
   private dropIndex = -1;
 
-  constructor(main: Source, private actions: EditorActions) {
+  constructor(main: Source, private actions: EditorActions, private outline: OutlineNode[] = []) {
     this.sources.set(main.id, main);
     this.pages = Array.from({ length: main.doc.numPages }, (_, i) => ({ key: newKey(), src: main.id, index: i, rotation: 0 }));
 
@@ -55,11 +57,19 @@ export class PageEditor {
       { label: "Kareli sayfa", hint: "işlem, grafik", run: () => this.insertBlank("grid") },
       { label: "Başka PDF'ten sayfalar…", run: () => this.pickOther() },
     ], "right"));
+    const marginBtn = h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm", "aria-haspopup": "menu" }, "Not alanı ▾");
+    marginBtn.addEventListener("click", () => openMenu(marginBtn, [
+      { label: "Yok", run: () => this.setMargin(0) },
+      { label: "Sağa %25", hint: "kenar notları", run: () => this.setMargin(0.25) },
+      { label: "Sağa %50", hint: "geniş not alanı", run: () => this.setMargin(0.5) },
+    ]));
     const action = (label: string, key: string | null, run: () => void, danger = false) =>
       h("button", { class: `cm-btn cm-btn--ghost cm-btn--sm${danger ? " cm-btn--danger" : ""}`, onclick: run }, label, key ? " " : "", key ? kbd(key) : null);
     const bar = h("div", { class: "cm-actionbar", role: "toolbar", "aria-label": "Sayfa işlemleri" },
       this.selInfo, h("span", { class: "cm-bar__sep" }),
       action("Döndür", "R", () => this.rotate()),
+      action("Kırp…", "K", () => this.openCrop()),
+      marginBtn,
       action("Çoğalt", "Ctrl D", () => this.duplicate()),
       action("Sil", "Del", () => this.remove(), true),
       action("Ayrı PDF olarak kaydet", null, () => void this.save(true)),
@@ -124,8 +134,19 @@ export class PageEditor {
       const on = this.selected.has(p.key);
       const label = p.blank
         ? h("span", { class: "cm-tag", text: `Yeni · ${{ blank: "Boş", lined: "Çizgili", grid: "Kareli" }[p.blank]}` })
-        : h("span", { class: "cm-num cm-muted", text: `${num(p.index + 1)}${p.src !== "main" ? ` · ${this.sources.get(p.src!)?.name ?? ""}` : ""}${p.rotation ? " · döndürüldü" : ""}` });
+        : h("span", { class: "cm-num cm-muted", text: `${num(p.index + 1)}${p.src !== "main" ? ` · ${this.sources.get(p.src!)?.name ?? ""}` : ""}${p.rotation ? " · döndürüldü" : ""}${p.crop ? " · kırpıldı" : ""}${p.margin ? " · not alanı" : ""}` });
       const page = h("div", { class: `cm-pcard__page${p.blank === "grid" ? " cm-pcard__page--grid" : p.blank === "lined" ? " cm-pcard__page--lined" : ""}` });
+      // Kırpılacak alanın dışı soluk; not alanı sağda çizgili şerit.
+      if (p.crop) {
+        const c = h("span", { class: "cm-pcard__crop", "aria-hidden": "true" });
+        c.style.cssText = `left:${p.crop[0] * 100}%;top:${p.crop[1] * 100}%;width:${p.crop[2] * 100}%;height:${p.crop[3] * 100}%`;
+        page.append(c);
+      }
+      if (p.margin) {
+        const m = h("span", { class: "cm-pcard__margin", "aria-hidden": "true" });
+        m.style.width = `${(p.margin / (1 + p.margin)) * 100}%`;
+        page.append(m);
+      }
       const card = h("div", {
         class: `cm-pcard${on ? " is-selected" : ""}`,
         role: "option",
@@ -199,7 +220,10 @@ export class PageEditor {
       const s = p.rotation % 180 ? Math.min(1, THUMB_W / (src.height * d), THUMB_H / (src.width * d)) : 1;
       c.style.transform = `rotate(${p.rotation}deg) scale(${s})`;
     }
-    card.querySelector(".cm-pcard__page")!.replaceChildren(c);
+    // Kırpma ve not alanı kaplamaları korunur.
+    const holder = card.querySelector(".cm-pcard__page")!;
+    holder.querySelector(":scope > canvas")?.remove();
+    holder.prepend(c);
   }
 
   // ---------- Seçim ----------
@@ -256,6 +280,76 @@ export class PageEditor {
     const t = this.targets();
     if (!t.size) return;
     this.commit(this.pages.map((p) => (t.has(p.key) ? { ...p, rotation: (p.rotation + 90) % 360 } : p)));
+  }
+
+  private setMargin(m: number): void {
+    const t = this.targets();
+    if (!t.size) {
+      toast("Önce sayfa seç.");
+      return;
+    }
+    this.commit(this.pages.map((p) => (t.has(p.key) && !p.blank ? { ...p, margin: m || undefined } : p)));
+  }
+
+  /**
+   * Kırpma: seçili (ya da odaktaki) sayfalara aynı kenar payları. Görünen sayfaya göre yüzde;
+   * önizleme ilk sayfada canlı. Vurgular ve işaretler kırpılmış sayfadaki yerlerine taşınır.
+   */
+  private openCrop(): void {
+    const t = this.targets();
+    const first = this.pages.find((p) => t.has(p.key) && !p.blank);
+    if (!first) return void toast("Önce kırpılacak sayfayı seç.");
+    const d = openDialog({ title: t.size > 1 ? `Kırp · ${num(t.size)} sayfa` : "Kırp", width: 640 });
+    const [cx, cy, cw, ch] = first.crop ?? [0, 0, 1, 1];
+    const vals = { top: Math.round(cy * 100), left: Math.round(cx * 100), right: Math.round((1 - cx - cw) * 100), bottom: Math.round((1 - cy - ch) * 100) };
+    const box = h("div", { class: "cm-crop__box", "aria-hidden": "true" });
+    const pageBox = h("div", { class: "cm-crop__page" }, box);
+    const frame = h("div", { class: "cm-crop__frame" }, pageBox);
+    const draw = () => {
+      box.style.cssText = `left:${vals.left}%;top:${vals.top}%;right:${vals.right}%;bottom:${vals.bottom}%`;
+    };
+    void this.thumbFor(first).then((src) => {
+      if (!src) return;
+      // Kırpma görünen (döndürülmüş) sayfaya göre: önizleme de döndürülmüş çizilir.
+      const quarter = first.rotation % 180 !== 0;
+      const c = document.createElement("canvas");
+      c.width = quarter ? src.height : src.width;
+      c.height = quarter ? src.width : src.height;
+      const ctx = c.getContext("2d")!;
+      ctx.translate(c.width / 2, c.height / 2);
+      ctx.rotate((first.rotation * Math.PI) / 180);
+      ctx.drawImage(src, -src.width / 2, -src.height / 2);
+      pageBox.prepend(c);
+    });
+    const field = (k: keyof typeof vals, label: string) => {
+      const input = h("input", { class: "cm-input", type: "number", min: 0, max: 45, step: 1, value: vals[k], "aria-label": `${label} kenardan kırp (%)` });
+      input.addEventListener("input", () => {
+        vals[k] = Math.max(0, Math.min(45, Number(input.value) || 0));
+        draw();
+      });
+      return h("label", { class: "cm-crop__field" }, h("span", { class: "cm-muted", text: label }), input, h("span", { class: "cm-muted", text: "%" }));
+    };
+    draw();
+    d.body.style.cssText = "display:grid;grid-template-columns:minmax(0,1fr) 180px;gap:24px;align-items:start";
+    d.body.append(frame, h("div", { style: "display:flex;flex-direction:column;gap:8px" },
+      field("top", "Üst"), field("right", "Sağ"), field("bottom", "Alt"), field("left", "Sol"),
+      h("p", { class: "cm-muted", style: "margin:4px 0 0;font-size:13px;line-height:18px", text: "Slaytlardaki boş kenarları ya da taranmış sayfadaki gölgeleri kırp. Kırpılan alandaki vurgular kopyaya taşınmaz." }),
+    ));
+    d.foot.append(
+      h("button", { class: "cm-btn cm-btn--ghost", onclick: () => {
+        this.commit(this.pages.map((p) => (t.has(p.key) ? { ...p, crop: undefined } : p)));
+        d.close();
+      } }, "Kırpmayı kaldır"),
+      h("div", { style: "display:flex;gap:8px" },
+        h("button", { class: "cm-btn", onclick: d.close }, "Vazgeç"),
+        h("button", { class: "cm-btn cm-btn--primary", onclick: () => {
+          const crop: Rect = [vals.left / 100, vals.top / 100, 1 - (vals.left + vals.right) / 100, 1 - (vals.top + vals.bottom) / 100];
+          const none = !vals.left && !vals.top && !vals.right && !vals.bottom;
+          this.commit(this.pages.map((p) => (t.has(p.key) && !p.blank ? { ...p, crop: none ? undefined : crop } : p)));
+          d.close();
+        } }, "Uygula"),
+      ),
+    );
   }
 
   private duplicate(): void {
@@ -368,6 +462,7 @@ export class PageEditor {
     if (ctrl) return false;
     if (e.key === "Delete" || e.key === "Backspace") return this.remove(), true;
     if (e.key.toLowerCase() === "r") return this.rotate(), true;
+    if (e.key.toLowerCase() === "k") return this.openCrop(), true;
     return false;
   }
 
@@ -491,11 +586,8 @@ export class PageEditor {
         /* sayfa okunamadı: sayma */
       }
     }
-    const outline = await doc.getOutline().catch(() => null);
-    const parts: string[] = [];
-    if (links) parts.push(`Bu dosyadaki ${num(links)} iç bağlantı yeni kopyada çalışmayabilir.`);
-    if (outline?.length) parts.push("İçindekiler ağacı kopyaya taşınmaz.");
-    this.warnEl.textContent = parts.join(" ");
+    // İçindekiler ağacı kopyaya taşınır; iç bağlantılar taşınmaz.
+    this.warnEl.textContent = links ? `Bu dosyadaki ${num(links)} iç bağlantı yeni kopyada çalışmayabilir.` : "";
   }
 
   private async save(onlySelected: boolean): Promise<void> {
@@ -508,7 +600,7 @@ export class PageEditor {
     const name = onlySelected ? `${mainName}-secilen-sayfalar.pdf` : `${mainName}-duzenlenmis.pdf`;
     try {
       const { buildPdf } = await import("./build"); // pdf-lib yalnızca kaydederken yüklenir
-      const out = await buildPdf(pages, this.sources);
+      const out = await buildPdf(pages, this.sources, this.outline);
       const hashes = new Map([...this.sources.values()].filter((x) => x.hash).map((x) => [x.id, x.hash!] as [string, string]));
       this.actions.saved(out, name, pages, hashes);
       if (!onlySelected) this.history = [];

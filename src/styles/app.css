@@ -102,7 +102,7 @@ button.cm-bar__file { display: block; line-height: 26px; text-align: left; }
 .cm-panel__resize { position: absolute; left: 0; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 3; }
 .cm-panel__resize:hover, .cm-panel__resize.is-drag { background: var(--line-strong); }
 .cm-list { overflow-y: auto; }
-.cm-item { content-visibility: auto; contain-intrinsic-size: auto 96px; }
+/* .cm-item: panel sanal liste kullanır (ui/virtual.ts); content-visibility ölçümü bozacağı için yok. */
 .cm-item.is-new { animation: cm-new 600ms ease-out; }
 @keyframes cm-new { from { background: var(--accent-soft); } }
 .cm-item__quote mark { background: var(--hl); }
@@ -276,12 +276,20 @@ label.cm-field { cursor: pointer; }
 .cm-pcard.is-selected:focus-visible .cm-pcard__page { outline: 3px solid var(--accent); outline-offset: 3px; box-shadow: 0 0 0 8px var(--accent-soft); }
 .cm-pcard__page { padding: 0; display: grid; place-items: center; }
 .cm-pcard__page canvas { max-width: 100%; max-height: 100%; display: block; transition: transform 120ms; }
+.cm-pcard__page { overflow: hidden; }
 [data-theme="dark"][data-pdf-dark="soften"] .cm-pcard__page canvas { filter: var(--pdf-soften); }
 .cm-pcard__check { pointer-events: none; }
 .cm-pcard__check .cm-check { background: var(--surface-raised); }
 .cm-pcard__check .cm-check.is-on { background: var(--accent); }
 .cm-pcard.is-dragging .cm-pcard__page { opacity: .35; }
 .cm-dropline { pointer-events: none; height: 204px; }
+.cm-pcard__crop { position: absolute; box-shadow: 0 0 0 999px rgba(31, 29, 26, .35); outline: 1.5px dashed var(--accent); pointer-events: none; z-index: 1; }
+.cm-pcard__margin { position: absolute; right: 0; top: 0; bottom: 0; background: repeating-linear-gradient(0deg, #fff 0 9px, #cfd9e3 9px 10px); border-left: 1px dashed var(--accent); z-index: 1; }
+.cm-crop__frame { position: relative; display: grid; place-items: center; background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius-md); padding: var(--space-3); min-height: 240px; overflow: hidden; }
+.cm-crop__page { position: relative; display: inline-block; line-height: 0; }
+.cm-crop__frame canvas { max-width: 100%; max-height: 420px; box-shadow: var(--shadow-sheet); }
+.cm-crop__box { position: absolute; outline: 2px dashed var(--accent); box-shadow: 0 0 0 999px rgba(31, 29, 26, .35); pointer-events: none; }
+.cm-crop__field { display: grid; grid-template-columns: 40px 1fr auto; gap: 8px; align-items: center; }
 .cm-dragcount { position: fixed; z-index: 70; pointer-events: none; background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 
 /* ---------- duyarlı düzen: tablet ve mobil ---------- */
