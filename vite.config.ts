@@ -22,7 +22,7 @@ const csp: Plugin = {
       // AI açıkken istekler yalnızca kullanıcının kendi anahtarıyla Anthropic API'sine gider.
       // Dışarıya yalnızca AI açıkken ve kullanıcı sorunca: kendi anahtarıyla Anthropic / OpenAI,
       // bu bilgisayardaki yerel model sunucusu, cihazda model için tek seferlik model indirme.
-      "connect-src 'self' blob: data: https://api.anthropic.com https://api.openai.com http://localhost:* http://127.0.0.1:* https://huggingface.co https://*.huggingface.co https://*.hf.co https://raw.githubusercontent.com",
+      "connect-src 'self' blob: data: https://api.anthropic.com https://api.openai.com https://generativelanguage.googleapis.com http://localhost:* http://127.0.0.1:* https://huggingface.co https://*.huggingface.co https://*.hf.co https://raw.githubusercontent.com",
       "object-src 'none'",
       "base-uri 'none'",
       "form-action 'none'",

@@ -1,5 +1,5 @@
 import { askSimple, friendlyError, ready, visionReady } from "../ai/client";
-import type { AiSettings } from "../types";
+import { AI_PROVIDERS, type AiProvider, type AiSettings } from "../types";
 import { h } from "../util";
 import { canvasBase64 } from "../write/raster";
 import { openDialog } from "./dialog";
@@ -46,7 +46,7 @@ export function openHandwriting(o: HandwritingOptions): void {
       h("button", { class: `cm-seg__btn${method === m ? " is-on" : ""}`, role: "radio", "aria-checked": String(method === m), disabled, onclick: () => ((method = m), renderMethods(), void run()) }, label);
     methodRow.replaceChildren(
       opt("ocr", "Bu cihazda (OCR)"),
-      opt("ai", vision ? `AI (${o.ai.mode === "anthropic" ? "Claude" : "OpenAI"})` : "AI (görsel desteği yok)", !vision),
+      opt("ai", vision ? `AI (${AI_PROVIDERS[o.ai.mode as AiProvider].short})` : "AI (görsel desteği yok)", !vision),
     );
   };
   renderMethods();
@@ -60,7 +60,7 @@ export function openHandwriting(o: HandwritingOptions): void {
         : "Tanıma bu cihazda yapılır, hiçbir şey gönderilmez. Düzgün, ayrık harflerde iyi çalışır; bitişik el yazısında AI daha iyidir. ");
       if (!vision) note.append(h("button", { class: "cm-linkbtn", style: "color:var(--accent)", onclick: () => (d.close(), o.openAiSettings()) }, "AI'yı ayarla"));
     } else {
-      note.append(`Bu seçimin görseli ${o.ai.mode === "anthropic" ? "Anthropic'e" : "OpenAI'ye"} gönderilir; sayfanın geri kalanı gönderilmez.`);
+      note.append(`Bu seçimin görseli ${AI_PROVIDERS[o.ai.mode as AiProvider].label} sağlayıcısına gönderilir; sayfanın geri kalanı gönderilmez.`);
     }
   };
 

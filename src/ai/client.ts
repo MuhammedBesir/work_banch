@@ -9,6 +9,8 @@ export async function ask(ai: AiSettings, o: AskBase): Promise<AskResult> {
       return (await import("./anthropic")).ask(o, ai.keys.anthropic, ai.models.anthropic);
     case "openai":
       return (await import("./openai")).ask(o, { apiKey: ai.keys.openai, model: ai.models.openai });
+    case "gemini":
+      return (await import("./gemini")).ask(o, ai.keys.gemini, ai.models.gemini);
     case "local":
       return (await import("./openai")).ask(o, { apiKey: "", model: ai.models.local, baseURL: ai.localUrl.replace(/\/+$/, "") });
     case "device":
@@ -25,6 +27,8 @@ export async function friendlyError(ai: AiSettings, err: unknown): Promise<{ tit
     case "openai":
     case "local":
       return (await import("./openai")).friendlyError(err, ai.mode === "local");
+    case "gemini":
+      return (await import("./gemini")).friendlyError(err);
     case "device":
       return (await import("./device")).friendlyError(err);
     default:
@@ -36,12 +40,13 @@ export async function friendlyError(ai: AiSettings, err: unknown): Promise<{ tit
 export function ready(ai: AiSettings): boolean {
   if (ai.mode === "anthropic") return !!ai.keys.anthropic;
   if (ai.mode === "openai") return !!ai.keys.openai;
+  if (ai.mode === "gemini") return !!ai.keys.gemini;
   return ai.mode !== "off";
 }
 
-/** Görsel (el yazısı) gönderebilen sağlayıcı: Claude ve OpenAI. */
+/** Görsel (el yazısı) gönderebilen sağlayıcı: Claude, OpenAI ve Gemini. */
 export function visionReady(ai: AiSettings): boolean {
-  return (ai.mode === "anthropic" || ai.mode === "openai") && ready(ai);
+  return (ai.mode === "anthropic" || ai.mode === "openai" || ai.mode === "gemini") && ready(ai);
 }
 
 /** Belgeye bağlı olmayan tek seferlik istek (el yazısı, matematik, özet, çeviri). */

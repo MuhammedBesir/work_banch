@@ -121,13 +121,13 @@ export type PdfDark = "soften" | "original";
 export type UiSize = "small" | "normal" | "large";
 
 /** AI'nın nerede çalıştığı: bulut sağlayıcısı (kendi anahtarınla), bilgisayardaki yerel sunucu ya da tarayıcıda (cihazda). */
-export type AiProvider = "anthropic" | "openai" | "local" | "device";
+export type AiProvider = "anthropic" | "openai" | "gemini" | "local" | "device";
 export type AiMode = "off" | AiProvider;
 
 export interface AiSettings {
   mode: AiMode;
   /** Yalnızca bu tarayıcıda saklanır; yedeğe girmez. */
-  keys: { anthropic: string; openai: string };
+  keys: { anthropic: string; openai: string; gemini: string };
   models: Record<AiProvider, string>;
   /** OpenAI uyumlu yerel sunucu (Ollama, LM Studio). */
   localUrl: string;
@@ -143,6 +143,11 @@ export const AI_PROVIDERS: Record<AiProvider, { label: string; short: string; cl
     ],
   },
   openai: { label: "OpenAI", short: "OpenAI", cloud: true, models: [["gpt-5", "GPT-5"], ["gpt-5-mini", "GPT-5 mini"]] },
+  // Takma adlar her zaman Google'ın güncel modeline gider; kesin sürüm "Modelleri yükle" ile seçilir.
+  gemini: {
+    label: "Google Gemini", short: "Gemini", cloud: true,
+    models: [["gemini-flash-latest", "Gemini Flash (güncel, hızlı)"], ["gemini-pro-latest", "Gemini Pro (güncel, en iyi)"], ["gemini-flash-lite-latest", "Gemini Flash-Lite (en ucuz)"]],
+  },
   local: { label: "Bilgisayarımdaki model (Ollama, LM Studio)", short: "Yerel sunucu", cloud: false, models: [["llama3.1", "llama3.1"], ["qwen2.5", "qwen2.5"]] },
   device: {
     label: "Bu tarayıcıda (cihazda)", short: "Cihazda", cloud: false,
@@ -196,8 +201,8 @@ export const DEFAULT_SETTINGS: Settings = {
   panelOpen: true,
   ai: {
     mode: "off",
-    keys: { anthropic: "", openai: "" },
-    models: { anthropic: "claude-opus-5-5", openai: "gpt-5-mini", local: "llama3.1", device: "Qwen2.5-1.5B-Instruct-q4f16_1-MLC" },
+    keys: { anthropic: "", openai: "", gemini: "" },
+    models: { anthropic: "claude-opus-5-5", openai: "gpt-5-mini", gemini: "gemini-flash-latest", local: "llama3.1", device: "Qwen2.5-1.5B-Instruct-q4f16_1-MLC" },
     localUrl: "http://localhost:11434/v1",
   },
   pen: { color: "blue", width: 2 },

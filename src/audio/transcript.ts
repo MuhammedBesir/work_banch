@@ -40,18 +40,22 @@ export function openTranscript(o: TranscriptOptions): void {
     actions();
   };
 
-  const canWhisper = o.ai.mode === "openai" && ready(o.ai);
+  const canWhisper = (o.ai.mode === "openai" || o.ai.mode === "gemini") && ready(o.ai);
+  const sttName = o.ai.mode === "gemini" ? "Gemini" : "OpenAI";
   const transcribe = async () => {
     ctrl?.abort();
     const c = (ctrl = new AbortController());
-    const { transcribe: run, MAX_BYTES } = await import("../ai/transcribe");
-    if (rec.blob.size > MAX_BYTES) {
-      status.textContent = "Kayıt 25 MB'tan büyük; OpenAI bu boyutu kabul etmiyor. Daha kısa kayıtlar al.";
+    // Gemini isteğe gömülü sesi ~20 MB'a kadar, OpenAI 25 MB'a kadar kabul eder.
+    const max = o.ai.mode === "gemini" ? 18 * 1024 * 1024 : 25 * 1024 * 1024;
+    if (rec.blob.size > max) {
+      status.textContent = `Kayıt ${Math.round(max / 1048576)} MB'tan büyük; ${sttName} bu boyutu kabul etmiyor. Daha kısa kayıtlar al.`;
       return;
     }
-    status.textContent = "Yazıya dökülüyor… (kayıt OpenAI'ye gönderildi)";
+    status.textContent = `Yazıya dökülüyor… (kayıt ${sttName}'ye gönderildi)`;
     try {
-      const segs = await run(rec.blob, rec.mime, o.ai.keys.openai, c.signal);
+      const segs = o.ai.mode === "gemini"
+        ? await (await import("../ai/gemini")).transcribe(rec.blob, rec.mime, o.ai.keys.gemini, o.ai.models.gemini, c.signal)
+        : await (await import("../ai/transcribe")).transcribe(rec.blob, rec.mime, o.ai.keys.openai, c.signal);
       rec = { ...rec, transcript: segs };
       o.save(rec);
       status.textContent = segs.length ? `${segs.length} parça yazıya döküldü.` : "Kayıtta konuşma bulunamadı.";
@@ -83,7 +87,7 @@ export function openTranscript(o: TranscriptOptions): void {
       has ? h("button", { class: "cm-btn cm-btn--ghost", onclick: () => o.download(`${rec.title}.md`, `# ${rec.title}\n\n${asText()}\n${summary.textContent ? `\n## Özet\n\n${summary.textContent}\n` : ""}`) }, "İndir (.md)") : null,
       has ? h("button", { class: "cm-btn cm-btn--ghost", onclick: () => o.copy(asText()) }, "Kopyala") : null,
       !summary.hidden && summary.textContent ? h("button", { class: "cm-btn cm-btn--ghost", onclick: () => o.addNote(`Ders özeti (${rec.title})\n${summary.textContent}`) }, "Özeti not olarak ekle") : null,
-      canWhisper ? h("button", { class: "cm-btn cm-btn--ghost", onclick: () => void transcribe() }, has ? "Yeniden yazıya dök" : "Yazıya dök (OpenAI)") : null,
+      canWhisper ? h("button", { class: "cm-btn cm-btn--ghost", onclick: () => void transcribe() }, has ? "Yeniden yazıya dök" : `Yazıya dök (${sttName})`) : null,
       has && ready(o.ai) && o.ai.mode !== "off" ? h("button", { class: "cm-btn", onclick: () => void summarize() }, "AI ile özetle") : null,
     ].filter((x): x is HTMLButtonElement => !!x));
   }
@@ -91,7 +95,7 @@ export function openTranscript(o: TranscriptOptions): void {
   if (!rec.transcript?.length && !canWhisper) {
     status.replaceChildren(
       "Yazıya dökmek için iki yol var: kayda başlarken Canlı yazıya dökme'yi aç (tarayıcının konuşma tanıması) ya da ",
-      h("button", { class: "cm-linkbtn", style: "color:var(--accent)", onclick: () => (d.close(), o.openAiSettings()) }, "OpenAI anahtarı gir"),
+      h("button", { class: "cm-linkbtn", style: "color:var(--accent)", onclick: () => (d.close(), o.openAiSettings()) }, "Gemini ya da OpenAI anahtarı gir"),
       " (kayıt yalnızca sen isteyince gönderilir).",
     );
   }

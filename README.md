@@ -108,7 +108,7 @@ Varsayılan **kapalı**; kapalıyken AI'a dair hiçbir düğme görünmez. Ayarl
 
 - **Bu cihazda** (WebGPU, WebLLM): hiçbir şey dışarı gitmez; ilk kullanımda model indirilir (~1–2 GB).
 - **Yerel sunucu** (Ollama / LM Studio, OpenAI uyumlu `localhost` adresi).
-- **Anthropic** (Claude Opus 5.5 varsayılan; Sonnet 5.5, Haiku 5.5) ya da **OpenAI**, kendi API anahtarınla.
+- **Anthropic** (Claude Opus 5.5 varsayılan; Sonnet 5.5, Haiku 5.5), **Google Gemini** ya da **OpenAI**, kendi API anahtarınla. Gemini'de model listesi anahtarla API'den yüklenir (varsayılan `gemini-flash-latest` takma adı); Gemini ses kaydını da yazıya döker ve el yazısını görselden okur. İstekler tarayıcıdan doğrudan sağlayıcıya gider.
 
 Sohbet geçmişi dosya başına saklanır, Markdown olarak dışa aktarılır; her cevabın altında token sayısı ve tahmini ücret görünür. "Kaynakları vurgula" cevabın dayandığı yerleri seçtiğin renkle vurgular.
 

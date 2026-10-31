@@ -28,3 +28,14 @@ describe("yardımcılar", () => {
     expect(contextChars(ctx)).toBe(7);
   });
 });
+
+import { parseStamped } from "../src/ai/gemini";
+
+describe("Gemini yazıya dökme", () => {
+  it("zaman damgalı satırları ayrıştırır", () => {
+    expect(parseStamped("[00:05] Merhaba\n[01:02:03] Uzun ders\ndevamı")).toEqual([
+      { t: 5000, text: "Merhaba" },
+      { t: 3723000, text: "Uzun ders devamı" },
+    ]);
+  });
+});
