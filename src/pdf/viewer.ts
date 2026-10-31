@@ -196,7 +196,8 @@ export class Viewer {
       this.tops.push(y);
       y += hgt + GAP;
     }
-    this.root.style.minWidth = `${Math.round(this.maxWidth() * this.scale) + PAD_X * 2 + this.reserveLeft * 2}px`;
+    // En az sahne genişliği (sayfa ortada kalsın), sayfa daha genişse yatay kaydırma için onun kadar.
+    this.root.style.minWidth = `max(100%, ${Math.round(this.maxWidth() * this.scale) + PAD_X * 2 + this.reserveLeft * 2}px)`;
     this.root.style.paddingLeft = this.root.style.paddingRight = this.reserveLeft ? `${PAD_X + this.reserveLeft}px` : "";
     this.root.style.setProperty("--z", String(this.scale)); // Yaz modu katmanı zoom ile ölçeklenir
     this.root.classList.toggle("is-paged", this.scrollMode === "paged");
