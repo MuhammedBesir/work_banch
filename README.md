@@ -132,6 +132,12 @@ Sohbet geçmişi dosya başına saklanır, Markdown olarak dışa aktarılır; h
 
 Koyu temada invert, serbest renk, aynı anda çoklu dosya, hesap/senkronizasyon.
 
+## Performans
+
+- Açılış paketi ~286 KB (gzip ~98 KB). pdf.js, pdf-lib, AI SDK'ları, KaTeX, OCR, Word/PowerPoint kütüphaneleri ayrı parçalar; pdf.js açılış ekranından sonra boşta önceden yüklenir.
+- 400 sayfalık belge ~1 sn'de açılır, bellekte ~13 MB; aynı anda yalnızca görünen sayfalar (±2) çizilir, uzaktakiler bırakılır. Kaydırırken önce ekrandaki sayfalar, komşular duraksayınca; hızlı kaydırmada geçilen sayfalar çizilmez.
+- OCR motoru 90 sn kullanılmazsa kapanır.
+
 ## Yapı
 
 ```
