@@ -55,14 +55,16 @@ export class AiPanel {
   readonly el: HTMLElement;
   private fullBtn: HTMLButtonElement;
   private full = false;
-  private imageBox: HTMLInputElement;
+  private withImage = true;
+  private imgBtn: HTMLButtonElement;
+  private scopeBtn: HTMLButtonElement;
   private list: HTMLElement;
   private quick: HTMLElement;
-  private input: HTMLInputElement;
+  private input: HTMLTextAreaElement;
   private sendBtn: HTMLButtonElement;
   private sentLine: HTMLElement;
   private preview: HTMLTextAreaElement;
-  private scopeSeg: HTMLElement;
+
   private mode: HTMLElement;
   private scope: Scope = "page";
   private ctx: AiContext | null = null;
@@ -78,16 +80,23 @@ export class AiPanel {
     this.mode = h("span", { class: "cm-ai__mode cm-ai__mode--cloud" });
     this.quick = h("div", { class: "cm-quick", role: "group", "aria-label": "Hızlı istekler" });
     this.list = h("div", { class: "cm-list cm-ai__list", "aria-live": "polite" });
-    this.scopeSeg = h("div", { class: "cm-seg cm-seg--sm", role: "group", "aria-label": "Kapsam" });
-    this.imageBox = h("input", { type: "checkbox", checked: true, "aria-label": "Sayfanın görüntüsünü de gönder" });
-    this.imageBox.addEventListener("change", () => void this.loadPreview());
-    this.input = h("input", { class: "cm-input", placeholder: "Bu belgeye sor…", "aria-label": "AI'ya sor" });
+    // Kapsam: tek düğme, menüden seçilir (Seçim, Alan, Bu sayfa, Bölüm, Vurgularım).
+    this.scopeBtn = h("button", { class: "cm-ai__chip", "aria-haspopup": "menu", title: "Kapsam: AI'ya neyin gönderileceği", onclick: () => openMenu(this.scopeBtn, SCOPES.map(([sc, label]) => ({
+      label, on: this.scope === sc, run: () => (sc === "area" ? this.actions.pickArea() : this.setScope(sc)),
+    }))) });
+    this.imgBtn = h("button", { class: "cm-ai__iconbtn", "aria-pressed": "true", "aria-label": "Görüntüsünü de gönder", title: "Görüntüsünü de gönder: şekil, formül ve tabloları AI da görsün", onclick: () => {
+      this.withImage = !this.withImage;
+      this.imgBtn.setAttribute("aria-pressed", String(this.withImage));
+      void this.loadPreview();
+    } }, icon("image"));
+    this.input = h("textarea", { class: "cm-ai__input", rows: 1, placeholder: "Bu belgeye sor…", "aria-label": "AI'ya sor" });
+    this.input.addEventListener("input", () => this.growInput());
     this.input.addEventListener("keydown", (e) => {
       e.stopPropagation();
-      if (e.key === "Enter") (e.preventDefault(), this.submit());
+      if (e.key === "Enter" && !e.shiftKey) (e.preventDefault(), this.submit());
       else if (e.key === "Escape") (e.preventDefault(), this.stop());
     });
-    this.sendBtn = h("button", { class: "cm-btn cm-btn--primary", onclick: () => (this.abort ? this.stop() : this.submit()) }, "Sor");
+    this.sendBtn = h("button", { class: "cm-ai__sendbtn", "aria-label": "Sor (Enter)", title: "Sor (Enter)", onclick: () => (this.abort ? this.stop() : this.submit()) }, icon("send"));
     this.preview = h("textarea", { class: "cm-ai__preview", "aria-label": "Gönderilecek metin (kırpabilirsin)", hidden: true, rows: 6 });
     this.preview.addEventListener("input", () => {
       this.edited = true;
@@ -95,24 +104,31 @@ export class AiPanel {
     });
     this.preview.addEventListener("keydown", (e) => e.stopPropagation());
     this.sentLine = h("div", { class: "cm-ai__sent" });
-    this.fullBtn = h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--icon", "aria-label": "Tam ekran", title: "Tam ekran (genişletmek için sol kenarı da sürükleyebilirsin)", "aria-pressed": "false", onclick: () => this.setFull(!this.full) }, icon("expand"));
+    this.fullBtn = h("button", { class: "cm-ai__iconbtn", "aria-label": "Tam ekran", title: "Tam ekran (genişletmek için sol kenarı da sürükleyebilirsin)", "aria-pressed": "false", onclick: () => this.setFull(!this.full) }, icon("expand"));
     this.spentEl = h("span", { class: "cm-num cm-muted", title: "Bu oturumdaki tahmini AI harcaması" });
-    const head = h("div", { class: "cm-panel__head" },
-      h("div", { class: "cm-panel__title" }, h("span", { text: "AI" }), this.mode),
-      h("div", { class: "cm-panel__tools" },
-        h("button", { class: "cm-linkbtn", onclick: () => this.history.length ? this.actions.exportChat(this.history) : toast("Dışa aktaracak sohbet yok.") }, "Sohbeti dışa aktar"),
-        h("button", { class: "cm-linkbtn", onclick: () => this.clear() }, "Temizle"),
-        this.spentEl,
+    // Tek satır başlık: model rozeti solda, simge düğmeler sağda.
+    const iconBtn = (name: string, label: string, run: () => void) =>
+      h("button", { class: "cm-ai__iconbtn", "aria-label": label, title: label, onclick: run }, icon(name));
+    const head = h("div", { class: "cm-ai__head" },
+      this.mode,
+      this.spentEl,
+      h("div", { class: "cm-ai__tools" },
+        iconBtn("bolt", "Hızlı istekler", () => this.quickMenu()),
+        iconBtn("download", "Sohbeti dışa aktar (.md)", () => (this.history.length ? this.actions.exportChat(this.history) : toast("Dışa aktaracak sohbet yok."))),
+        iconBtn("trash", "Sohbeti temizle", () => this.clear()),
         this.fullBtn,
       ),
     );
+    // Yazma kutusu: üstte kapsam ve araçlar, ortada soru, sağda gönder; altında gönderilecek özeti.
     const send = h("div", { class: "cm-ai__send" },
-      h("div", { class: "cm-field", style: "justify-content:space-between;flex-wrap:wrap;gap:6px" },
-        h("span", { class: "cm-muted", style: "font-size:12px", text: "Kapsam" }),
-        h("div", { style: "display:flex;gap:6px;align-items:center;flex-wrap:wrap" },
-          this.scopeSeg,
-          h("button", { class: "cm-btn cm-btn--sm cm-btn--withicon", title: "Sayfada bir alanı fareyle ya da parmakla çerçevele; şekil, formül ve tablolar da görüntü olarak gider (Shift A)", onclick: () => this.actions.pickArea() }, icon("area"), "Alan seç"))),
-      h("div", { style: "display:flex;gap:6px" }, this.input, this.sendBtn),
+      h("div", { class: "cm-ai__box" },
+        h("div", { class: "cm-ai__boxbar" },
+          this.scopeBtn,
+          h("button", { class: "cm-ai__iconbtn", "aria-label": "Alan seç (Shift A)", title: "Alan seç: sayfada sormak istediğin yeri çerçevele; şekil, formül ve tablolar da görülür (Shift A)", onclick: () => this.actions.pickArea() }, icon("area")),
+          this.imgBtn,
+        ),
+        h("div", { class: "cm-ai__row" }, this.input, this.sendBtn),
+      ),
       this.sentLine,
       this.preview,
     );
@@ -130,13 +146,14 @@ export class AiPanel {
     this.mode.className = `cm-ai__mode${cloud ? " cm-ai__mode--cloud" : ""}`;
     this.mode.textContent = `${cloud ? "Bulut" : AI_PROVIDERS[s.mode].short} · ${aiModelLabel(s)}`;
     this.renderQuick();
+    this.renderScope();
     void this.loadPreview();
     if (!this.historyLoaded) {
       this.historyLoaded = true;
       void this.actions.loadHistory().then((turns) => {
         if (!turns.length || this.history.length) return;
         this.history = turns;
-        this.list.replaceChildren(this.quick);
+        this.list.replaceChildren();
         for (const t of turns) this.renderTurn(t);
         this.appendWarning();
       });
@@ -216,8 +233,23 @@ export class AiPanel {
   }
 
   private renderScope(): void {
-    this.scopeSeg.replaceChildren(...SCOPES.map(([s, label]) =>
-      h("button", { class: this.scope === s ? "is-on" : "", "aria-pressed": String(this.scope === s), onclick: () => this.setScope(s) }, label)));
+    const label = SCOPES.find(([s]) => s === this.scope)?.[1] ?? "Bu sayfa";
+    this.scopeBtn.replaceChildren(icon(this.scope === "area" ? "area" : "doc"), h("span", { text: label }), icon("chev"));
+    this.scopeBtn.setAttribute("aria-label", `Kapsam: ${label}`);
+    // Görüntü düğmesi yalnızca görüntü gönderilebilen kapsam ve sağlayıcıda.
+    this.imgBtn.hidden = !(this.actions.vision() && (this.scope === "page" || this.scope === "area"));
+  }
+
+  /** Sohbet varken hızlı istekler başlıktaki şimşek menüsünde. */
+  private quickMenu(): void {
+    const items = [...this.quick.querySelectorAll<HTMLButtonElement>("button")].map((b) => ({ label: b.textContent?.replace(/\s*\d+$/, "").trim() ?? "", run: () => b.click(), disabled: b.disabled }));
+    const anchor = this.el.querySelector<HTMLElement>(".cm-ai__tools .cm-ai__iconbtn")!;
+    openMenu(anchor, items.filter((i) => !i.disabled), "right");
+  }
+
+  private growInput(): void {
+    this.input.style.height = "auto";
+    this.input.style.height = `${Math.min(160, this.input.scrollHeight)}px`;
   }
 
   /** Tam ekran: AI sütunu belge alanının yerini alır; Esc ya da aynı düğme geri getirir. */
@@ -237,7 +269,7 @@ export class AiPanel {
   private renderQuick(): void {
     const c = this.actions.counts();
     const chip = (label: Node[], scope: Scope, q: string, disabled = false) =>
-      h("button", { class: "cm-chip", disabled, onclick: () => this.run(q, scope) }, ...label);
+      h("button", { class: "cm-ai__suggest", disabled, onclick: () => this.run(q, scope) }, ...label);
     this.quick.replaceChildren(
       chip([document.createTextNode("Bu sayfayı özetle")], "page", "Bu sayfayı kısa maddeler halinde özetle."),
       chip([marker(2), document.createTextNode(" Anlamadıklarımı açıkla "), h("span", { class: "cm-num", text: num(c.hl2) })], "hl2",
@@ -255,17 +287,20 @@ export class AiPanel {
 
   private renderEmpty(): void {
     this.list.replaceChildren(
-      this.quick,
-      h("p", { class: "cm-muted", style: "margin:0;font-size:13px;line-height:18px" },
-        "Kapsamı seç, sorunu yaz. Cevaptaki her iddia sayfa etiketiyle gelir; etikete gelince dayandığı metin sayfada gösterilir. ",
-        kbd("Ctrl J"), " paneli açar, seçimdeyken ", kbd("A"), " seçimi sorar."),
+      h("div", { class: "cm-ai__empty" },
+        h("div", { class: "cm-ai__emptyicon", "aria-hidden": "true" }, icon("sparkle")),
+        h("p", { class: "cm-ai__emptytitle", text: "Bu belge hakkında sor" }),
+        h("p", { class: "cm-muted", text: "Cevaplar sayfa etiketiyle gelir; etikete gelince dayandığı yer sayfada gösterilir." }),
+        this.quick,
+        h("p", { class: "cm-ai__hint" }, kbd("Shift A"), " alan seç · ", kbd("A"), " seçimi sor · ", kbd("Ctrl J"), " paneli aç"),
+      ),
     );
   }
 
   private async loadPreview(): Promise<void> {
     const run = ++this.previewRun;
     this.sentLine.textContent = "Gönderilecek metin hazırlanıyor…";
-    const ctx = await this.actions.context(this.scope, this.imageBox.checked);
+    const ctx = await this.actions.context(this.scope, this.withImage);
     if (run !== this.previewRun) return;
     if ("error" in ctx) {
       this.ctx = null;
@@ -287,16 +322,11 @@ export class AiPanel {
       this.preview.hidden = !this.preview.hidden;
       this.renderSent();
     } }, this.preview.hidden ? "Göster" : "Gizle");
+    // Sade özet: "sayfa 15 · 48 karakter + görüntü · Göster"; alan seçiliyse küçük önizleme.
     this.sentLine.replaceChildren(
-      "Gönderilecek: ",
-      h("b", { text: `${this.ctx.label}${this.edited ? " (kırpıldı)" : ""} · ${num(chars)} karakter${this.ctx.image ? " + görüntü" : ""}` }),
-      " ",
+      ...(this.ctx.image ? [h("img", { class: "cm-ai__mini", src: this.ctx.image.thumb, alt: "" })] : []),
+      h("span", { text: `${this.ctx.label}${this.edited ? " (kırpıldı)" : ""} · ${num(chars)} karakter${this.ctx.image ? " + görüntü" : ""}` }),
       toggle,
-      // Sayfa ve bölümde: şekil, formül ve tablolar için sayfanın görüntüsü de gidebilir.
-      ...(this.actions.vision() && (this.scope === "page" || this.scope === "area")
-        ? [h("label", { class: "cm-ai__imgopt", title: "Metin katmanında olmayan şekil, formül ve tabloları AI da görsün" }, this.imageBox, " Görüntüsünü de gönder")]
-        : []),
-      ...(this.ctx.image ? [h("img", { class: "cm-ai__thumb", src: this.ctx.image.thumb, alt: "Gönderilecek görüntü" })] : []),
     );
   }
 
@@ -334,7 +364,7 @@ export class AiPanel {
     if (useCurrent || scope === this.scope) {
       ctx = this.outgoing();
     } else {
-      const c = await this.actions.context(scope, this.imageBox.checked);
+      const c = await this.actions.context(scope, this.withImage);
       if ("error" in c) {
         toast(c.error);
         return;
@@ -349,23 +379,27 @@ export class AiPanel {
       toast(`Cihazdaki model en fazla ${num(DEVICE_MAX_CHARS)} karakter okuyabilir; bu kapsam ${num(contextChars(ctx))}. Seçim ya da Bu sayfa kapsamını kullan, ya da metni kırp.`, undefined, 7000);
       return;
     }
-    if (!this.history.length && this.list.querySelector(".cm-ai__turn") === null) this.list.replaceChildren(this.quick);
+    // İlk soruda boş durum (öneriler) kalkar; öneriler başlıktaki şimşek menüsünde kalır.
+    if (this.list.querySelector(".cm-ai__turn") === null) this.list.replaceChildren();
 
     const turn = h("div", { class: "cm-ai__turn" },
       h("div", { style: "display:flex;flex-direction:column" },
-        h("div", { class: "cm-ai__ctx", style: "align-self:flex-end", text: `${ctx.label} · ${num(contextChars(ctx))} karakter${ctx.image ? " + görüntü" : ""} gönderildi` }),
-        ctx.image ? h("img", { class: "cm-ai__thumb", src: ctx.image.thumb, alt: "Gönderilen görüntü", style: "align-self:flex-end" }) : null,
+        h("div", { class: "cm-ai__ctx" },
+          ctx.image ? h("img", { class: "cm-ai__thumb", src: ctx.image.thumb, alt: "Gönderilen görüntü" }) : null,
+          h("span", { text: `${ctx.label} · ${num(contextChars(ctx))} karakter${ctx.image ? " + görüntü" : ""}` })),
         h("div", { class: "cm-ai__q", text: question }),
       ),
     );
-    const answer = h("div", { class: "cm-ai__a" }, h("p", { class: "cm-muted", text: "Düşünüyor…" }));
+    const answer = h("div", { class: "cm-ai__a" }, h("p", { class: "cm-ai__thinking", "aria-label": "Düşünüyor" }, h("i"), h("i"), h("i")));
     turn.append(answer);
     this.list.append(turn);
     turn.scrollIntoView({ block: "end" });
 
     this.abort = new AbortController();
-    this.sendBtn.textContent = "Durdur";
-    this.sendBtn.classList.remove("cm-btn--primary");
+    this.sendBtn.replaceChildren(icon("stop"));
+    this.sendBtn.setAttribute("aria-label", "Durdur (Esc)");
+    this.sendBtn.title = "Durdur (Esc)";
+    this.sendBtn.classList.add("is-stop");
     let text = "";
     let frame = 0;
     const model = s.mode === "off" ? "" : s.models[s.mode];
@@ -401,7 +435,7 @@ export class AiPanel {
         this.actions.saveHistory(this.history);
         if (res.usage) {
           this.spent += estimateCost(model, res.usage) ?? 0;
-          this.spentEl.textContent = this.spent ? `Oturum: ${formatCost(this.spent)}` : "";
+          this.spentEl.textContent = this.spent ? formatCost(this.spent) : "";
         }
         turn.append(this.usageLine(model, res.usage), this.answerActions(res.text, question, scope));
         if (question === CARD_PROMPT) {
@@ -417,8 +451,10 @@ export class AiPanel {
       if (text) turn.append(this.answerActions(text, question, scope));
     } finally {
       this.abort = null;
-      this.sendBtn.textContent = "Sor";
-      this.sendBtn.classList.add("cm-btn--primary");
+      this.sendBtn.replaceChildren(icon("send"));
+      this.sendBtn.setAttribute("aria-label", "Sor (Enter)");
+      this.sendBtn.title = "Sor (Enter)";
+      this.sendBtn.classList.remove("is-stop");
       this.appendWarning();
     }
   }
@@ -473,20 +509,24 @@ export class AiPanel {
     const cites = segment(text.replace(/\n/g, " ")).flatMap((s) => s.cites);
     const page = cites[0]?.page ?? this.ctx?.pages[0]?.page ?? 0;
     const quoted = cites.filter((c) => c.quote);
-    const hlBtn = h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm", "aria-haspopup": "menu", disabled: !quoted.length, title: quoted.length ? "Kaynakların dayandığı metni sayfada vurgula" : "Bu cevapta alıntılı kaynak yok" }, "Kaynakları vurgula ▾");
+    // Cevap altı: tek sıra, simgeli küçük düğmeler (ad ipucunda).
+    const act = (name: string, label: string, run: () => void, extra: Record<string, string | boolean> = {}) =>
+      h("button", { class: "cm-ai__act", "aria-label": label, title: label, onclick: run, ...extra }, icon(name), h("span", { text: label }));
+    const hlBtn = act("highlight", "Kaynakları vurgula", () => {}, { "aria-haspopup": "menu", disabled: !quoted.length });
+    if (!quoted.length) hlBtn.title = "Bu cevapta alıntılı kaynak yok";
     hlBtn.addEventListener("click", () => openMenu(hlBtn, COLORS.map((c) => ({
       label: `${this.actions.colorName(c)} · ${c}`,
       run: () => void this.actions.highlightCites(quoted, c).then((n) => toast(n ? `${num(n)} kaynak vurgulandı` : "Alıntılar sayfada birebir bulunamadı.")),
     }))));
-    return h("div", { style: "display:flex;gap:6px;flex-wrap:wrap" },
-      h("button", { class: "cm-btn cm-btn--sm", onclick: () => this.actions.addNote(page, plainText(text)) }, "Not olarak ekle"),
+    return h("div", { class: "cm-ai__acts" },
+      act("sticky", "Not olarak ekle", () => this.actions.addNote(page, plainText(text))),
       hlBtn,
-      h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm", onclick: () => navigator.clipboard.writeText(plainText(text)).then(() => toast("Kopyalandı"), () => toast("Kopyalanamadı")) }, "Kopyala"),
-      h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm", onclick: () => {
+      act("copy", "Kopyala", () => void navigator.clipboard.writeText(plainText(text)).then(() => toast("Kopyalandı"), () => toast("Kopyalanamadı"))),
+      act("undo", "Yeniden üret", () => {
         this.history = this.history.filter((t) => t.answer !== text);
         this.actions.saveHistory(this.history);
         void this.run(question, scope);
-      } }, "Yeniden üret"),
+      }),
     );
   }
 }

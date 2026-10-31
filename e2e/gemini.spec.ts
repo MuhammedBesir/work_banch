@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import { collectErrors, openSample } from "./helpers";
 
@@ -109,12 +110,15 @@ test("Alan seç ve sor: alanın görüntüsü ve metni gider", async ({ page, br
   await page.mouse.up();
   await expect(page.locator(".cm-ai__sent")).toContainText("seçilen alan (s. 1)");
   await expect(page.locator(".cm-ai__sent")).toContainText("görüntü");
-  await page.locator(".cm-ai__send input:not([type=checkbox])").fill("Bu kısım ne anlatıyor?");
+  await page.locator(".cm-ai__input").fill("Bu kısım ne anlatıyor?");
   await page.keyboard.press("Enter");
   await expect(page.locator(".cm-ai")).toContainText("Bu alanda normal dağılım anlatılıyor.");
   const parts = body!.contents.at(-1)!.parts;
   expect(parts[0].inline_data?.mime_type).toMatch(/image\//);
   expect(parts.at(-1)!.text).toContain("Normal Distribution");
+  // Yeni AI paneli erişilebilirlik denetiminden geçer.
+  const a11y = await new AxeBuilder({ page }).include(".cm-right").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(a11y.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)).toEqual([]);
 });
 
 test("AI ile quiz: oluştur, cevapla, kontrol et", async ({ page, browserName }) => {

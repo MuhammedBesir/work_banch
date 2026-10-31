@@ -39,6 +39,12 @@ const PATHS: Record<string, string> = {
   expand: "M11 3h6v6M9 17H3v-6M17 3l-6 6M3 17l6-6",
   collapse: "M15 9h-4V5M5 11h4v4M11 9l6-6M9 11l-6 6",
   area: "M3 6V3h3M14 3h3v3M17 14v3h-3M6 17H3v-3M7 3h2M11 3h2M7 17h2M11 17h2M3 8v4M17 8v4",
+  send: "M3.5 10L16.5 4l-4.5 12.5-2.5-5zM10 11.5l6.5-7.5",
+  stop: "M6 6h8v8H6z",
+  chev: "M6 8l4 4 4-4",
+  doc: "M5 2.5h7l3 3v12H5zM12 2.5v3h3M7.5 9h5M7.5 12h5M7.5 15h3",
+  bolt: "M11 2.5L4.5 11h5l-1 6.5 7-9h-5z",
+  download: "M10 3v10M6 9l4 4 4-4M4 16.5h12",
   quiz: "M4 3h12v14H4zM7 7h6M7 10.5h6M7 14h3",
   // üst çubuk
   search: "M8.5 3.5a5 5 0 110 10 5 5 0 010-10zM12.2 12.2L16.5 16.5",
