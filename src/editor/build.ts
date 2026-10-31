@@ -20,7 +20,7 @@ export interface EditPage {
   index: number;
   /** Kullanıcının eklediği saat yönü dönüş: 0, 90, 180, 270. */
   rotation: number;
-  blank?: "blank" | "lined" | "grid";
+  blank?: "blank" | "lined" | "grid" | "dots";
   /** Kırpma: döndürülmüş (görünen) sayfaya göre 0–1 kutu. */
   crop?: Rect;
   /** Not alanı: sayfanın sağına, görünen genişliğin bu oranında boş alan eklenir. */
@@ -48,6 +48,7 @@ export async function buildPdf(pages: EditPage[], sources: Map<string, Pick<Sour
       const page = out.addPage(lastSize);
       if (p.blank === "lined") drawLined(page);
       if (p.blank === "grid") drawGrid(page);
+      if (p.blank === "dots") drawDots(page);
       continue;
     }
     let src = loaded.get(p.src);
@@ -72,12 +73,18 @@ export async function buildPdf(pages: EditPage[], sources: Map<string, Pick<Sour
   return out.save();
 }
 
-function drawLined(page: PDFPage): void {
+export function drawDots(page: PDFPage): void {
+  const { width, height } = page.getSize();
+  const step = 14.17; // 5 mm
+  for (let x = step; x < width; x += step) for (let y = step; y < height; y += step) page.drawCircle({ x, y, size: 0.55, color: LINE });
+}
+
+export function drawLined(page: PDFPage): void {
   const { width, height } = page.getSize();
   for (let y = height - 72; y > 48; y -= 24) page.drawLine({ start: { x: 48, y }, end: { x: width - 48, y }, thickness: 0.6, color: LINE });
 }
 
-function drawGrid(page: PDFPage): void {
+export function drawGrid(page: PDFPage): void {
   const { width, height } = page.getSize();
   const step = 14.17; // 5 mm
   for (let x = 0; x <= width; x += step) page.drawLine({ start: { x, y: 0 }, end: { x, y: height }, thickness: 0.4, color: LINE });

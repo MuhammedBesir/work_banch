@@ -20,6 +20,9 @@ import { openHandwriting } from "./ui/handwriting";
 import { AudioBar } from "./audio/bar";
 import { canLiveTranscribe, canRecord, clock, Recorder } from "./audio/recorder";
 import { openTranscript } from "./audio/transcript";
+import { askCover, askFolder, askNotebook, askPin, askTags } from "./ui/organize";
+import { appendPages, createNotebook, type Template } from "./editor/notebook";
+import { checkLock, makeLock } from "./app/lock";
 import { rasterInk } from "./write/raster";
 import { unionBox } from "./write/geometry";
 import { looksLikePdf, looksScanned, loadOutline, OpenError, openPdf, pageText, type OutlineItem } from "./pdf/load";
@@ -34,7 +37,7 @@ import { AiPanel, type Scope } from "./ui/ai";
 import { askPassword, BIG_BYTES, BIG_PAGES, confirmBigFile, openAiSetup, openExport, openSettings, openShortcuts } from "./ui/dialogs";
 import { markBox } from "./write/geometry";
 import { renderMarks } from "./write/layer";
-import { toggleCheck } from "./write/rich";
+import { richPlain, toggleCheck } from "./write/rich";
 import { WriteMode } from "./write/writeMode";
 import { ReviewScreen } from "./review/review";
 import { freshSchedule, parseSuggestions } from "./review/srs";
@@ -48,7 +51,7 @@ import { toast } from "./ui/toast";
 import { canInstall, install, isInstalled, registerPwa } from "./app/pwa";
 import { clearErrors, installErrorLog, readErrors, setErrorLog } from "./app/errors";
 import { backupDue, markBackedUp, snoozeBackup } from "./app/backupReminder";
-import { copiesUsage, deleteAllCopies, hasCopy, opfsSupported, readCopy, saveCopy } from "./app/opfs";
+import { copiesUsage, deleteAllCopies, deleteCopy, hasCopy, opfsSupported, readCopy, saveCopy } from "./app/opfs";
 import { bytes as fmtBytes } from "./format";
 import { openDialog } from "./ui/dialog";
 
@@ -166,6 +169,25 @@ function settingsDialog(): void {
     counts: () => Object.fromEntries(COLORS.map((c) => [c, highlights.filter((x) => x.color === c).length])) as Record<Color, number>,
     backup: () => void backupNow(),
     restore: () => pickBackup(),
+    ...("showDirectoryPicker" in window ? {
+      backupFolder: {
+        label: async () => (await backupDir())?.name ?? "",
+        choose: async () => {
+          try {
+            const dir = await (window as unknown as { showDirectoryPicker(o: unknown): Promise<DirHandle> }).showDirectoryPicker({ mode: "readwrite", id: "yedek" });
+            await db.putMeta("backupDir", dir);
+            await autoBackup();
+            toast(`Yedek ${dir.name} klasörüne yazıldı; değişikliklerden sonra kendiliğinden güncellenir.`);
+          } catch {
+            /* vazgeçti */
+          }
+        },
+        clear: async () => {
+          await db.putMeta("backupDir", null);
+          toast("Otomatik yedek kapatıldı.");
+        },
+      },
+    } : {}),
     wipe: () => void wipeAll(),
     shortcuts: openShortcuts,
     ai: aiSetup,
@@ -338,7 +360,7 @@ function showOpenError(title: string, text: string, detail?: string): void {
   void showHome().then(() => home?.showError({ title, text, detail }));
 }
 
-async function openFile(file: File, handle?: FsHandle): Promise<void> {
+async function openFile(file: File, handle?: FsHandle, extra: Partial<FileRecord> = {}): Promise<void> {
   let bigConfirmed = false;
   if (file.size > BIG_BYTES) {
     if (!(await confirmBigFile(file.name, file.size))) return;
@@ -370,7 +392,16 @@ async function openFile(file: File, handle?: FsHandle): Promise<void> {
     return;
   }
   const existing = await db.getFile(hash);
+  // Kilitli dosya: PIN doğrulanmadan açılmaz.
+  if (existing?.lock && !(await unlock(existing))) {
+    await doc.destroy();
+    home?.showIdle();
+    return;
+  }
   const rec: FileRecord = {
+    // Düzen bilgisi (klasör, etiket, kapak, kilit, not defteri) korunur.
+    ...existing,
+    ...extra,
     hash,
     name: file.name,
     size: file.size,
@@ -417,6 +448,191 @@ async function openRecent(row: RecentRow): Promise<void> {
   await pickFile();
 }
 
+// ---------- Son açılanları düzenleme, not defteri, kilit, paylaşım paketi ----------
+
+async function unlock(rec: FileRecord): Promise<boolean> {
+  let error = "";
+  for (let i = 0; i < 5; i++) {
+    const pin = await askPin(`„${rec.name}" kilitli`, "Açmak için PIN'i gir.", false, error);
+    if (pin === null) return false;
+    if (await checkLock(rec.lock!, pin)) return true;
+    error = "PIN yanlış.";
+  }
+  toast("Çok fazla yanlış deneme.");
+  return false;
+}
+
+async function organize(rec: FileRecord, what: import("./ui/home").Organize): Promise<void> {
+  const all = await db.allFiles();
+  const cur = (await db.getFile(rec.hash)) ?? rec;
+  let next: FileRecord | null = null;
+  if (what === "pin") next = { ...cur, pinned: !cur.pinned };
+  else if (what === "folder") {
+    const f = await askFolder(cur.folder ?? "", [...new Set(all.map((x) => x.folder).filter((x): x is string => !!x))]);
+    if (f !== null) next = { ...cur, folder: f || undefined };
+  } else if (what === "tags") {
+    const t = await askTags(cur.tags ?? [], [...new Set(all.flatMap((x) => x.tags ?? []))]);
+    if (t !== null) next = { ...cur, tags: t.length ? t : undefined };
+  } else if (what === "cover") {
+    const c = await askCover(cur.cover);
+    if (c !== null) next = { ...cur, cover: c || undefined };
+  } else if (what === "lock") {
+    if (cur.lock) {
+      if (!(await unlock(cur))) return;
+      next = { ...cur, lock: undefined };
+      toast("Kilit kaldırıldı.");
+    } else {
+      const pin = await askPin(`„${cur.name}" dosyasını kilitle`, "Bu tarayıcıda açmak için PIN istenir, kapak önizlemesi gizlenir. Not: veriler şifrelenmez; PIN'i unutursan kilidi kaldıramazsın ama yedekten geri yükleyebilirsin.", true);
+      if (!pin) return;
+      next = { ...cur, lock: await makeLock(pin) };
+      await db.putMeta(`thumb:${cur.hash}`, null);
+      toast("Dosya kilitlendi.");
+    }
+  } else if (what === "remove") {
+    if (!(await confirmDialog({ title: "Listeden kaldırılsın mı?", text: `„${cur.name}" son açılanlardan kalkar. Vurgu ve notların silinmez; aynı dosyayı açınca geri gelir.`, ok: "Kaldır" }))) return;
+    await db.deleteFile(cur.hash);
+    await deleteCopy(cur.hash);
+    await refreshRecent();
+    return;
+  }
+  if (!next) return;
+  await db.putFile(next);
+  if (reader?.file.rec.hash === next.hash) reader.file.rec = next;
+  await refreshRecent();
+}
+
+async function newNotebook(): Promise<void> {
+  const c = await askNotebook();
+  if (!c) return;
+  const bytes = await createNotebook(c.template, c.pages, c.landscape, c.name);
+  const name = /\.pdf$/i.test(c.name) ? c.name : `${c.name}.pdf`;
+  await openFile(new File([bytes], name, { type: "application/pdf" }), undefined, { notebook: { template: c.template } });
+  if (reader) {
+    void setMode("write");
+    toast("Not defteri hazır: Yaz modunda yazmaya başlayabilirsin. Sona sayfa eklemek için defterin en altındaki düğmeyi kullan.", undefined, 7000);
+  }
+}
+
+/** Not defterinin sonuna sayfa ekle: dosya değişir, bütün işaretler yeni sürüme taşınır. */
+async function appendNotebookPage(): Promise<void> {
+  if (!reader?.file.rec.notebook) return;
+  const r = reader;
+  if (r.recorder.state !== "idle") {
+    toast("Kayıt sürerken sayfa eklenemez; önce kaydı bitir.");
+    return;
+  }
+  const template: Template = r.file.rec.notebook!.template;
+  const bytes = await appendPages(r.file.bytes, template, 1);
+  const hash = await sha256(bytes.slice().buffer as ArrayBuffer);
+  const old = r.file.rec;
+  await db.moveFileData(old.hash, hash);
+  const rec: FileRecord = { ...old, hash, size: bytes.byteLength, pageCount: old.pageCount + 1, lastPage: old.pageCount, lastOpened: Date.now() };
+  await db.putFile(rec);
+  await db.deleteFile(old.hash);
+  if (opfsSupported()) {
+    await saveCopy(hash, bytes);
+    await deleteCopy(old.hash);
+  }
+  const doc = await openPdf(bytes.slice(), () => Promise.resolve(null));
+  const mode = r.mode;
+  await openReader({ rec, bytes, doc, title: r.file.title });
+  if (mode === "write") void setMode("write");
+  announce(`Sayfa ${rec.pageCount} eklendi`);
+}
+
+const BUNDLE = "calisma-masasi-paket";
+
+/** Paylaşım paketi: PDF ve bu dosyanın bütün işaretleri tek dosyada (arkadaşına gönder, o da açsın). */
+async function exportBundle(): Promise<void> {
+  if (!reader) return;
+  const r = reader;
+  let bin = "";
+  const bytes = r.file.bytes;
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  const pkg = {
+    format: BUNDLE, version: 1, name: r.file.rec.name, createdAt: Date.now(),
+    pdf: btoa(bin), highlights, marks, cards: cards.filter((c) => c.status === "active"),
+  };
+  download(`${r.file.rec.name.replace(/\.pdf$/i, "")}.paket.json`, JSON.stringify(pkg), "application/json");
+  toast("Paylaşım paketi indirildi: PDF ve bütün işaretlerin içinde. Alan kişi Paylaşım paketi aç ile açar.", undefined, 7000);
+}
+
+function pickBundle(): void {
+  const input = h("input", { type: "file", accept: "application/json,.json" });
+  input.addEventListener("change", async () => {
+    const f = input.files?.[0];
+    if (!f) return;
+    try {
+      const pkg = JSON.parse(await f.text()) as { format: string; name: string; pdf: string; highlights: Highlight[]; marks: Mark[]; cards?: Card[] };
+      if (pkg.format !== BUNDLE) throw new Error("format");
+      const bytes = Uint8Array.from(atob(pkg.pdf), (c) => c.charCodeAt(0));
+      const hash = await sha256(bytes.slice().buffer as ArrayBuffer);
+      // Paketteki işaretler bu dosyaya eklenir; aynı kimlikliler (önceden alınmış paket) güncellenir.
+      await db.putHighlights(pkg.highlights.map((x) => ({ ...x, fileHash: hash })));
+      await db.putMarks(pkg.marks.map((x) => ({ ...x, fileHash: hash })));
+      if (pkg.cards?.length) await db.putCards(pkg.cards.map((x) => ({ ...x, fileHash: hash })));
+      await openFile(new File([bytes], pkg.name, { type: "application/pdf" }));
+      toast(`Paket açıldı: ${num(pkg.highlights.length)} vurgu, ${num(pkg.marks.length)} işaret.`);
+    } catch {
+      toast("Bu dosya bir Çalışma Masası paylaşım paketi değil.");
+    }
+  });
+  input.click();
+}
+
+/** İlk sayfanın küçük resmi (kapak görünümü); kilitli dosyada üretilmez. */
+async function saveThumb(file: OpenDoc): Promise<void> {
+  if (file.rec.lock || (await db.getMeta(`thumb:${file.rec.hash}`))) return;
+  try {
+    const page = await file.doc.getPage(1);
+    const vp1 = page.getViewport({ scale: 1 });
+    const vp = page.getViewport({ scale: 240 / vp1.width });
+    const c = document.createElement("canvas");
+    c.width = Math.round(vp.width);
+    c.height = Math.round(vp.height);
+    const ctx = c.getContext("2d")!;
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, c.width, c.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    await db.putMeta(`thumb:${file.rec.hash}`, c.toDataURL("image/jpeg", 0.72));
+  } catch {
+    /* önizleme olmadan da çalışır */
+  }
+}
+
+// ---------- Otomatik yedek klasörü (Chromium) ----------
+
+type DirHandle = FileSystemDirectoryHandle & {
+  queryPermission?(o: { mode: string }): Promise<string>;
+  requestPermission?(o: { mode: string }): Promise<string>;
+};
+
+async function backupDir(): Promise<DirHandle | null> {
+  return (await db.getMeta<DirHandle>("backupDir")) ?? null;
+}
+
+/** Yedeği seçilen klasöre yaz (izin verilmişse, sessizce). */
+async function autoBackup(): Promise<void> {
+  const dir = await backupDir();
+  if (!dir) return;
+  try {
+    if ((await dir.queryPermission?.({ mode: "readwrite" })) !== "granted") return;
+    const f = await dir.getFileHandle("calisma-masasi-yedek.json", { create: true });
+    const w = await (f as FileSystemFileHandle & { createWritable(): Promise<FileSystemWritableFileStream> }).createWritable();
+    await w.write(JSON.stringify(await createBackup()));
+    await w.close();
+    await markBackedUp();
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+let autoBackupTimer = 0;
+function scheduleAutoBackup(): void {
+  clearTimeout(autoBackupTimer);
+  autoBackupTimer = window.setTimeout(() => void autoBackup(), 20000);
+}
+
 // ---------- Boş durum ----------
 
 async function showHome(): Promise<void> {
@@ -429,6 +645,14 @@ async function showHome(): Promise<void> {
       await refreshRecent();
     },
     settings: settingsDialog,
+    newNotebook: () => void newNotebook(),
+    importBundle: () => pickBundle(),
+    organize: (rec, what) => void organize(rec, what),
+    thumb: (hash) => db.getMeta<string>(`thumb:${hash}`).then((x) => x ?? null),
+    get view() {
+      return settings.homeView ?? "list";
+    },
+    setView: (v) => void changeSettings({ ...settings, homeView: v }).then(() => refreshRecent()),
   });
   app.replaceChildren(home.el);
   document.title = "Çalışma Masası";
@@ -459,6 +683,7 @@ function indexHighlights(): void {
 }
 
 function refreshHighlights(pages?: number[]): void {
+  scheduleAutoBackup();
   if (!reader) return;
   indexHighlights();
   if (pages) pages.forEach((p) => reader!.viewer.drawHighlights(p));
@@ -505,6 +730,7 @@ function drawMarks(page: number): void {
 
 function refreshMarks(pages?: number[]): void {
   if (!reader) return;
+  scheduleAutoBackup();
   indexMarks();
   const list = pages ?? [...Array(reader.viewer.pageCount).keys()];
   list.forEach(drawMarks);
@@ -612,6 +838,7 @@ async function openReader(file: OpenDoc): Promise<void> {
       "sep" as const,
     ] : []),
     { label: "Bu sayfaya not ekle", shortcut: "Shift N", run: () => addPageNote() },
+    ...(file.rec.notebook ? [{ label: "Sona sayfa ekle", run: () => void appendNotebookPage() }] : []),
     { label: "Metni tanıt (OCR): bu sayfa", run: () => void runOcr("page") },
     { label: "El yazısını tanı (aranabilir yap)", run: () => void runHandwriting(false) },
     { label: "Metni tanıt (OCR): tüm sayfalar", run: () => void runOcr("all") },
@@ -660,6 +887,11 @@ async function openReader(file: OpenDoc): Promise<void> {
   exportBtn.addEventListener("click", () => openMenu(exportBtn, [
     { label: "Markdown notları…", hint: ".md", run: () => exportDialog("md") },
     { label: "Vurgulu PDF…", hint: ".pdf", run: () => exportDialog("pdf") },
+    { label: "Word belgesi", hint: ".docx", run: () => void exportOffice("docx") },
+    { label: "PowerPoint (her sayfa bir slayt)", hint: ".pptx", run: () => void exportOffice("pptx") },
+    { label: "Bu sayfa resim olarak", hint: ".png", run: () => void exportOffice("png") },
+    { label: "Tüm sayfalar resim olarak", hint: ".zip", run: () => void exportOffice("zip") },
+    { label: "Paylaşım paketi (PDF + işaretler)", hint: ".json", run: () => void exportBundle() },
     "sep",
     { label: "Tekrar et", shortcut: "Alt T", run: () => openReview() },
   ], "right"));
@@ -860,6 +1092,9 @@ async function openReader(file: OpenDoc): Promise<void> {
   refreshHighlights();
   refreshMarks();
   applyHandwriting();
+  void saveThumb(file);
+  // Not defteri: sonsuz defter gibi, en altta sayfa ekle.
+  if (file.rec.notebook) viewer.root.append(h("button", { class: "cm-btn cm-pages__add", onclick: () => void appendNotebookPage() }, "+ Sona sayfa ekle"));
   rail.setBookmarks(file.rec.bookmarks);
   stage.focus({ preventScroll: true });
   if (file.rec.lastPage > 0) toast(`Kaldığın yerden: sayfa ${num(file.rec.lastPage + 1)}`);
@@ -980,6 +1215,42 @@ async function runOcr(scope: "page" | "all"): Promise<void> {
   if (done) {
     r.file.rec.scannedDismissed = true;
     void db.putFile(r.file.rec);
+  }
+}
+
+// ---------- Word, PowerPoint, resim ----------
+
+async function exportOffice(kind: "docx" | "pptx" | "png" | "zip"): Promise<void> {
+  if (!reader) return;
+  const r = reader;
+  const base = r.file.rec.name.replace(/\.pdf$/i, "");
+  const office = await import("./export/office");
+  let closeToast: (() => void) | undefined;
+  try {
+    if (kind === "docx") {
+      const blob = await office.notesDocx({ title: r.file.title, names: settings.names, highlights, marks, handwriting: new Map([...hwPages].map(([p, v]) => [p, v.text])) });
+      download(`${base}-notlar.docx`, blob, blob.type);
+      toast("Word belgesi indirildi.");
+      return;
+    }
+    // Sayfa görüntüleri işaretlerle birlikte: önce düzleştirilmiş PDF, sonra resim.
+    closeToast = toast("Sayfalar hazırlanıyor…", undefined, 600000);
+    const { exportAnnotatedPdf } = await import("./export/pdf");
+    const flat = await exportAnnotatedPdf(r.file.bytes, highlights, marks, { mode: "flatten", colors: new Set(COLORS), withNotes: false, withWriting: true, names: settings.names });
+    const only = kind === "png" ? [r.viewer.current] : undefined;
+    const images = await office.renderPages(flat, kind === "pptx" ? 1600 : 2000, (d, t) => announce(`Sayfa ${d} / ${t}`), only);
+    closeToast?.();
+    if (kind === "png") download(`${base}-s${r.viewer.current + 1}.png`, await (await fetch(images[0].png)).blob(), "image/png");
+    else if (kind === "zip") download(`${base}-sayfalar.zip`, await office.pagesZip(base, images), "application/zip");
+    else {
+      const blob = await office.pagesPptx(r.file.title, images, office.pageNotes(images.length, highlights, marks, settings.names));
+      download(`${base}.pptx`, blob, "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+    }
+    toast(kind === "png" ? "Sayfa resmi indirildi." : kind === "zip" ? `${num(images.length)} sayfa resmi indirildi.` : "PowerPoint dosyası indirildi.");
+  } catch (err) {
+    closeToast?.();
+    console.error(err);
+    toast("Dışa aktarılamadı. Sayfayı yenileyip tekrar dene.");
   }
 }
 
@@ -1656,14 +1927,31 @@ function sectionRange(outline: OutlineItem[], page: number): [number, number] | 
 async function aiContext(scope: Scope): Promise<AiContext | { error: string }> {
   if (!reader) return { error: "Açık dosya yok." };
   const cur = reader.viewer.current;
-  const hlPages = (list: Highlight[], label: string): AiContext | { error: string } => {
-    if (!list.length) return { error: "Bu kapsamda vurgu yok." };
+  const hlPages = (list: Highlight[], label: string, withWriting = false): AiContext | { error: string } => {
     const pages = new Map<number, string[]>();
     for (const x of [...list].sort(readingOrder)) {
       const line = `- [${settings.names[x.color]}] ${x.text}${x.note.trim() ? ` (Notum: ${x.note.trim()})` : ""}`;
       pages.set(x.page, [...(pages.get(x.page) ?? []), line]);
     }
-    return { label, pages: [...pages].map(([page, lines]) => ({ page, text: lines.join("\n") })) };
+    // "Vurgularım": metin kutuları, yapışkan notlar ve tanınmış el yazısı da girer.
+    let written = 0;
+    if (withWriting) {
+      for (const m of marks) {
+        if ((m.kind === "text" || (m.kind === "sticky" && !m.ai)) && m.text.trim()) {
+          pages.set(m.page, [...(pages.get(m.page) ?? []), `- [Yazdığım not] ${richPlain(m.text).replace(/\n/g, " / ")}`]);
+          written++;
+        }
+      }
+      for (const [p, hw] of hwPages) {
+        pages.set(p, [...(pages.get(p) ?? []), `- [El yazım] ${hw.text.replace(/\n/g, " / ")}`]);
+        written++;
+      }
+    }
+    if (!pages.size) return { error: "Bu kapsamda vurgu yok." };
+    return {
+      label: written ? `${label}, ${num(written)} not` : label,
+      pages: [...pages].sort((a, b) => a[0] - b[0]).map(([page, lines]) => ({ page, text: lines.join("\n") })),
+    };
   };
   switch (scope) {
     case "selection": {
@@ -1693,7 +1981,7 @@ async function aiContext(scope: Scope): Promise<AiContext | { error: string }> {
       return { label: `bölüm, s. ${num(a + 1)}–${num(b + 1)}`, pages };
     }
     case "highlights":
-      return hlPages(highlights, `${num(highlights.length)} vurgu`);
+      return hlPages(highlights, `${num(highlights.length)} vurgu`, true);
     case "hl2": {
       const list = highlights.filter((x) => x.color === 2);
       return hlPages(list, `${num(list.length)} "${settings.names[2]}" vurgusu`);

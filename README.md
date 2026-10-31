@@ -79,6 +79,25 @@ Tek tarayıcı için `npx playwright test --project=chromium` (projeler: `chromi
 - **İşaretler paneli** türe göre filtreler (Vurgu / Yazı / Çizim). Kalem çizimleri sayfa başına tek satırdır; el yazısı aranamaz, panel bunu açıkça yazar.
 - Metin kutuları ve notlar **Markdown dışa aktarmaya** girer (isteğe bağlı); tüm işaretler **JSON yedeğe** girer ve **Düzenle modunda** kaydedilen kopyaya sayfalarıyla (döndürmeyle birlikte) taşınır.
 
+## Samsung Notes'tan esinlenen not araçları
+
+- **Kalem türleri:** tükenmez, kurşun kalem, fosforlu (yarı saydam), dolma kalem (açılı uç, yöne göre kalınlık). Üç hazır renk + 12 özel ton ve renk seçici; son kullanılan özel renkler palette kalır.
+- **Kısmi silgi** (çizginin değdiği kısmı siler) ya da **bütün çizgi**. Kalemin yan tuşu ya da silgi ucu basılıyken geçici silgi.
+- **Kement** (`L`): çizerek seç; seçim kutusunun köşesinden **boyutlandır** (`Shift` oranı korur), sürükleyerek taşı, **renk değiştir**, çoğalt, sil.
+- **Çiz ve bekle:** kalemi bir an yerinde tutunca düz çizgi, üçgen, dörtgen, dikdörtgen ve elips düzeltilir.
+- **El yazısını düzleştir**, **metne çevir** ve **matematiği çöz** (kement çubuğundan): bu cihazda (OCR) ya da görsel destekleyen AI ile (Claude, OpenAI; yalnızca seçimin görseli gider).
+- **El yazısında arama:** Dosya menüsü › El yazısını tanı. Tanınan yazı sayfanın metin katmanına eklenir; Ctrl F, panel araması ve AI kapsamı görür. Yaz modundan çıkınca değişen sayfalar kendiliğinden yeniden tanınır.
+- **Resim** (`I` ya da `Ctrl V`): sayfaya eklenir, boyutlandırılır; PDF, Word ve PowerPoint dışa aktarmaya girer.
+- **Biçimli not:** metin kutusu ve yapışkan notta kalın, italik, altı/üstü çizili, madde, sıralı liste, **yapılacak** (tıklanabilir), başlık ve **tablo**; düzenlerken yazım denetimi.
+- **Ses kaydı** (`Alt R`): ders sırasında kayıt; o sırada eklenen vurgu ve işaretler kaydın o anına bağlanır, panelde `▶ dk:sn` ile o andan dinlenir, çalarken sonraki işaretler soluklaşır. Yazıya dökme: kayıt sırasında tarayıcının konuşma tanımasıyla (isteğe bağlı; Chrome'da ses Google'a gider) ya da sonradan OpenAI anahtarıyla. AI ile ders özeti. Kayıtlar yalnızca bu tarayıcıda saklanır, JSON yedeğe girmez.
+- **Not defteri:** boş, çizgili, kareli ya da noktalı; en altta **+ Sona sayfa ekle** (sonsuz defter gibi, işaretler yeni sürüme taşınır).
+- **Son açılanlar:** klasörler, etiketler, başa sabitleme, arama, **kapak görünümü** (ilk sayfa ya da renk), **not kilidi** (PIN; veri şifrelenmez, açılmayı ve önizlemeyi engeller).
+- **Dışa aktarma:** Word (.docx, renkli vurgular ve notlar), PowerPoint (.pptx, her sayfa bir slayt, notlar konuşmacı notunda), sayfa resmi (.png) ve bütün sayfalar (.zip).
+- **Paylaşma ve eşitleme (sunucusuz):** *Paylaşım paketi* PDF'i ve bütün işaretleri tek dosyada taşır, alan kişi "Paylaşım paketi aç" ile açar. Chromium'da *otomatik yedek klasörü* seçilebilir; OneDrive / Google Drive / iCloud klasörü seçilirse yedek diğer cihazlara da gider.
+- **AI:** "Notlarımı düzenle" (vurgu, not ve el yazısından düzenli çalışma notu) ve "Bu sayfayı çevir".
+
+Bilerek yok: gerçek zamanlı ortak düzenleme ve hesapla bulut eşitleme (sunucu ve hesap gerektirir; uygulama bilerek sunucusuz).
+
 ## Tekrar modu
 
 `Alt T` ya da Dışa aktar menüsü. Vurgulardan otomatik kartlar (vurgu ön yüz, notun arka yüz), basitleştirilmiş aralıklı tekrar (Tekrar et / Zor / Kolay; `Space` çevir, `1`–`3` puan). AI açıksa "Kart öner" tanımlardan kart önerir; öneriler onaylanmadan desteye girmez.
@@ -114,12 +133,16 @@ src/main.ts               uygulama kabuğu: dosya açma, okuyucu, kısayollar, m
 src/pdf/viewer.ts         sanallaştırılmış görüntüleyici: canvas + vurgu katmanı + pdf.js metin katmanı
 src/pdf/load.ts           pdf.js yükleme, parola, taranmış PDF tespiti, içindekiler
 src/editor/               Düzenle modu (ızgara, seçim, sürükle-bırak) ve pdf-lib ile kopya üretimi
-src/write/                Yaz modu: palet ve işaretçi (writeMode), vektör katman (layer), geometri
+src/write/                Yaz modu: palet ve işaretçi (writeMode), vektör katman (layer), geometri (şekil tanıma, kısmi silgi, kement),
+                          biçimli not (rich), renkler, el yazısı görüntüsü (raster)
 src/ai/                   AI: istem, kapsam ve kaynak etiketleri (prompt), sağlayıcılar (anthropic, openai, device) ve dağıtıcı (client)
 src/review/               Tekrar modu: aralıklı tekrar (srs) ve ekran
 src/export/pdf.ts         vurgulu / işaretli PDF (yassı ya da açıklama)
 src/ocr/ocr.ts            tarayıcıda OCR ve OCR metin katmanı
-src/app/                  PWA, OPFS kopyaları, yedek hatırlatma, hata günlüğü
+src/app/                  PWA, OPFS kopyaları, yedek hatırlatma, hata günlüğü, not kilidi
+src/audio/                ses kaydı, oynatıcı çubuğu, yazıya dökme ve özet penceresi
+src/export/office.ts      Word, PowerPoint, PNG / ZIP dışa aktarma (docx, pptxgenjs, jszip; ayrı parçalar)
+src/editor/notebook.ts    boş not defteri ve sona sayfa ekleme
 src/ui/                   boş durum, panel, AI paneli, şerit, yüzen çubuk, arama, pencereler, bildirimler
 src/db.ts                 IndexedDB (dosyalar, vurgular, Yaz modu işaretleri, kartlar, ayarlar ve meta)
 src/markdown.ts           Markdown dışa aktarma

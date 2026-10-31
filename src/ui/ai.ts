@@ -208,6 +208,10 @@ export class AiPanel {
       chip([marker(4), document.createTextNode(" Tanımları açıkla "), h("span", { class: "cm-num", text: num(c.hl4) })], "hl4",
         "\"Tanım\" olarak işaretlediğim tanımları kendi cümlelerinle, birer örnekle açıkla.", c.hl4 === 0),
       chip([document.createTextNode("Kart öner "), h("span", { class: "cm-num", text: num(c.hl2 + c.hl4) })], "hl24", CARD_PROMPT, c.hl2 + c.hl4 === 0),
+      chip([document.createTextNode("Notlarımı düzenle")], "highlights",
+        "Vurgularımı, notlarımı ve yazdıklarımı düzenli bir çalışma notuna dönüştür: konulara göre grupla, her grubun başına kısa bir başlık satırı yaz, altına maddeler. Sayfa sırasını koru, tekrarları birleştir, her maddeye kaynağını ekle."),
+      chip([document.createTextNode("Bu sayfayı çevir")], "page",
+        "Bu sayfanın metnini Türkçeye çevir; metin zaten Türkçeyse İngilizceye çevir. Teknik terimlerin aslını parantez içinde bırak. Paragraf paragraf ilerle."),
     );
   }
 

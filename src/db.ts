@@ -196,6 +196,27 @@ export async function deleteRecording(id: string): Promise<void> {
   await wrap((await store("recordings", "readwrite")).delete(id));
 }
 
+/** Dosyanın içeriği değişince (not defterine sayfa eklendi) bütün verisini yeni özete taşı. */
+export async function moveFileData(from: string, to: string): Promise<void> {
+  const db = await open();
+  for (const name of ["highlights", "marks", "cards", "recordings"]) {
+    const list: { fileHash: string }[] = await wrap(db.transaction(name).objectStore(name).index("fileHash").getAll(from));
+    if (!list.length) continue;
+    const tx = db.transaction(name, "readwrite");
+    for (const x of list) tx.objectStore(name).put({ ...x, fileHash: to });
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+  for (const k of ["ai", "ocr", "hw", "thumb"]) {
+    const v = await getMeta(`${k}:${from}`);
+    if (v === undefined) continue;
+    await putMeta(`${k}:${to}`, v);
+    await wrap((await store("meta", "readwrite")).delete(`${k}:${from}`));
+  }
+}
+
 export async function saveSettings(s: Settings): Promise<void> {
   await wrap((await store("meta", "readwrite")).put(s, "settings"));
 }

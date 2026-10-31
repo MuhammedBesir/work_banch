@@ -133,7 +133,7 @@ export class PageEditor {
     this.pages.forEach((p, i) => {
       const on = this.selected.has(p.key);
       const label = p.blank
-        ? h("span", { class: "cm-tag", text: `Yeni · ${{ blank: "Boş", lined: "Çizgili", grid: "Kareli" }[p.blank]}` })
+        ? h("span", { class: "cm-tag", text: `Yeni · ${{ blank: "Boş", lined: "Çizgili", grid: "Kareli", dots: "Noktalı" }[p.blank]}` })
         : h("span", { class: "cm-num cm-muted", text: `${num(p.index + 1)}${p.src !== "main" ? ` · ${this.sources.get(p.src!)?.name ?? ""}` : ""}${p.rotation ? " · döndürüldü" : ""}${p.crop ? " · kırpıldı" : ""}${p.margin ? " · not alanı" : ""}` });
       const page = h("div", { class: `cm-pcard__page${p.blank === "grid" ? " cm-pcard__page--grid" : p.blank === "lined" ? " cm-pcard__page--lined" : ""}` });
       // Kırpılacak alanın dışı soluk; not alanı sağda çizgili şerit.

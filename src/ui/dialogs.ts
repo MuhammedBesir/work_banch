@@ -24,6 +24,8 @@ export interface SettingsActions {
   counts(): Record<Color, number>;
   backup(): void;
   restore(): void;
+  /** Otomatik yedek klasörü (Chromium): OneDrive / Google Drive klasörü seçilirse yedek oraya eşitlenir. */
+  backupFolder?: { label(): Promise<string>; choose(): void; clear(): void };
   wipe(): void;
   shortcuts(): void;
   ai(): void;
@@ -38,6 +40,15 @@ export interface SettingsActions {
 export function openSettings(settings: Settings, a: SettingsActions): void {
   const s: Settings = { ...settings, names: { ...settings.names } };
   const copiesLine = h("div", { class: "cm-muted", style: "font-size:13px;line-height:18px" });
+  const folderLine = h("div", { class: "cm-muted", style: "font-size:13px;line-height:18px;max-width:320px" });
+  const renderFolder = () => void a.backupFolder?.label().then((l) => folderLine.replaceChildren(
+    l ? `Otomatik yedek: ${l} klasörüne ` : "Otomatik yedek kapalı. ",
+    h("button", { class: "cm-linkbtn", style: "color:var(--accent)", onclick: () => a.backupFolder!.choose() }, l ? "Değiştir" : "Klasör seç"),
+    l ? " · " : "",
+    l ? h("button", { class: "cm-linkbtn", onclick: () => (a.backupFolder!.clear(), setTimeout(renderFolder, 100)) }, "Kapat") : "",
+    h("div", { style: "font-size:12px", text: "Bulut klasörü (OneDrive, Google Drive, iCloud) seçersen yedek diğer cihazlarına da gider; orada Yedekten geri yükle ile açarsın." }),
+  ));
+  renderFolder();
   void a.copies.usage().then((u) => {
     if (!u) return;
     copiesLine.replaceChildren(`Son açılanlar için saklanan: ${u} `, h("button", { class: "cm-linkbtn", onclick: () => (a.copies.clear(), copiesLine.replaceChildren()) }, "Sil"));
@@ -116,6 +127,7 @@ export function openSettings(settings: Settings, a: SettingsActions): void {
         h("div", { style: "display:flex;flex-direction:column;gap:8px;align-items:flex-start" },
           h("button", { class: "cm-btn cm-btn--sm", onclick: a.backup }, "Tüm vurguları yedekle (.json)"),
           h("button", { class: "cm-btn cm-btn--sm", onclick: a.restore }, "Yedekten geri yükle"),
+          a.backupFolder ? folderLine : null,
           h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--danger", onclick: () => (d.close(), a.wipe()) }, "Bu tarayıcıdaki tüm verileri sil…"),
           copiesLine,
         )),
@@ -268,7 +280,7 @@ export function openExport(o: {
 // ---------- Kısayollar ----------
 
 const SHORTCUTS: [string, [string, string][]][] = [
-  ["Okuma", [["J / →", "Sonraki sayfa"], ["K / ←", "Önceki sayfa"], ["G", "Sayfaya git"], ["Ctrl F", "Ara"], ["F", "Odak modu"], ["[  /  ]", "Sol şerit / sağ panel"], ["Ctrl + / −", "Yakınlaştır / uzaklaştır"], ["Ctrl 0", "Genişliğe sığdır"], ["B", "Sayfaya yer imi"], ["Shift N", "Sayfa notu"], ["Ctrl O", "Dosya aç"], ["Alt 1 / Alt 2 / Alt 3", "Oku / Yaz / Düzenle modu"], ["Ctrl J", "AI paneli (AI açıksa)"], ["Alt T", "Tekrar modu"]]],
+  ["Okuma", [["J / →", "Sonraki sayfa"], ["K / ←", "Önceki sayfa"], ["G", "Sayfaya git"], ["Ctrl F", "Ara"], ["F", "Odak modu"], ["[  /  ]", "Sol şerit / sağ panel"], ["Ctrl + / −", "Yakınlaştır / uzaklaştır"], ["Ctrl 0", "Genişliğe sığdır"], ["B", "Sayfaya yer imi"], ["Shift N", "Sayfa notu"], ["Ctrl O", "Dosya aç"], ["Alt 1 / Alt 2 / Alt 3", "Oku / Yaz / Düzenle modu"], ["Ctrl J", "AI paneli (AI açıksa)"], ["Alt T", "Tekrar modu"], ["Alt R", "Ses kaydını başlat / bitir"]]],
   ["Seçim varken", [["1 – 4", "Vurgu rengi"], ["N", "Not ekle"], ["C", "Kopyala"], ["A", "AI'ya sor (AI açıksa)"], ["Esc", "Kapat"], ["Ctrl Z", "Silineni geri al"]]],
   ["Tekrar modu", [["Space", "Cevabı göster"], ["1 / 2 / 3", "Bilemedim / Zorlandım / Bildim"], ["G", "Kaynak sayfaya git"], ["E", "Kartı düzenle"], ["Esc", "Belgeye dön"]]],
   ["Yaz modu", [["V", "Seç"], ["L", "Kement"], ["H", "Vurgu"], ["P", "Kalem"], ["T", "Metin kutusu"], ["S", "Yapışkan not"], ["R", "Şekil"], ["I", "Resim"], ["E", "Silgi"], ["Shift 1 – 3", "Kalem rengi"], ["Çiz ve bekle", "Şekli düzelt"], ["Kalem yan tuşu", "Basılıyken silgi"], ["Ctrl V", "Resim yapıştır"], ["Ctrl B / I / U", "Notta kalın / italik / altı çizili"], ["Ctrl Z / Ctrl Shift Z", "Geri al / yinele"], ["Del", "Seçili işareti sil"], ["Esc", "Seçimi kaldır / Oku moduna dön"]]],
