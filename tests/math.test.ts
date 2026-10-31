@@ -12,3 +12,9 @@ describe("AI cevabında matematik", () => {
     expect(mathToPlain("$\\frac{a}{b} \\le \\sqrt{x}$")).toBe("(a)/(b) ≤ √(x)");
   });
 });
+
+describe("düz metinde noktalı virgül", () => {
+  it("LaTeX boşluk komutu dışındaki ; korunur", () => {
+    expect(mathToPlain("$a;b\;c$")).toBe("a;b c");
+  });
+});

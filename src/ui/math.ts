@@ -94,7 +94,7 @@ function texToPlain(tex: string): string {
     .replace(/_\{([^}]*)\}/g, "_$1")
     .replace(/\^\{([^}]*)\}/g, "^$1")
     .replace(/[{}]/g, "")
-    .replace(/\\,|\;|\\!|\\ /g, " ")
+    .replace(/\\[,;! ]/g, " ")
     .normalize("NFC");
 }
 
