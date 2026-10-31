@@ -152,4 +152,6 @@ test("AI ile quiz: oluştur, cevapla, kontrol et", async ({ page, browserName })
   await page.locator(".cm-quiz__input").fill("Sigma");
   await page.getByRole("button", { name: "Kontrol et" }).click();
   await expect(page.locator(".cm-quiz__score")).toContainText("2 / 3");
+  const a11y = await new AxeBuilder({ page }).include(".cm-quizzes").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(a11y.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)).toEqual([]);
 });
