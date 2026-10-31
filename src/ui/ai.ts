@@ -4,6 +4,7 @@ import { num } from "../format";
 import type { AiSettings, Color } from "../types";
 import { AI_PROVIDERS, aiModelLabel, COLORS } from "../types";
 import { icon } from "./icons";
+import { ensureKatex, mathReady, mathToPlain, protectMath } from "./math";
 import { h, kbd, marker } from "../util";
 import { openMenu } from "./menu";
 import { toast } from "./toast";
@@ -470,6 +471,11 @@ export class AiPanel {
 
   /** Cevap: paragraflar ve maddeler; her kaynak bir sayfa etiketi, kaynaksız cümle soluk. */
   private renderAnswer(el: HTMLElement, text: string, final: boolean): void {
+    // Matematik ($…$) yer tutucuyla korunur: cümle bölme ve kaynak etiketleri onu bölmesin.
+    const original = text;
+    const math = protectMath(original);
+    if (math.text !== original && !mathReady()) void ensureKatex().then(() => final && el.isConnected && this.renderAnswer(el, original, true));
+    text = math.text;
     const frag = document.createDocumentFragment();
     let list: HTMLUListElement | null = null;
     for (const block of text.split(/\n{2,}/)) {
@@ -493,6 +499,7 @@ export class AiPanel {
       list = null;
     }
     el.replaceChildren(frag);
+    math.restore(el);
   }
 
   private citeChip(c: Cite): HTMLElement {
@@ -519,9 +526,9 @@ export class AiPanel {
       run: () => void this.actions.highlightCites(quoted, c).then((n) => toast(n ? `${num(n)} kaynak vurgulandı` : "Alıntılar sayfada birebir bulunamadı.")),
     }))));
     return h("div", { class: "cm-ai__acts" },
-      act("sticky", "Not olarak ekle", () => this.actions.addNote(page, plainText(text))),
+      act("sticky", "Not olarak ekle", () => this.actions.addNote(page, mathToPlain(plainText(text)))),
       hlBtn,
-      act("copy", "Kopyala", () => void navigator.clipboard.writeText(plainText(text)).then(() => toast("Kopyalandı"), () => toast("Kopyalanamadı"))),
+      act("copy", "Kopyala", () => void navigator.clipboard.writeText(mathToPlain(plainText(text))).then(() => toast("Kopyalandı"), () => toast("Kopyalanamadı"))),
       act("undo", "Yeniden üret", () => {
         this.history = this.history.filter((t) => t.answer !== text);
         this.actions.saveHistory(this.history);

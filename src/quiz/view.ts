@@ -1,5 +1,6 @@
 import { h } from "../util";
 import { icon } from "../ui/icons";
+import { renderMathIn } from "../ui/math";
 import { checkText, type Quiz, type QuizQuestion } from "./quiz";
 
 export interface QuizActions {
@@ -46,6 +47,7 @@ export class QuizSection {
     this.el.replaceChildren(head,
       ...(this.busy ? [h("p", { class: "cm-muted cm-quizzes__busy", role: "status", text: this.busy })] : []),
       ...[...quizzes].reverse().map((qz) => this.card(qz)));
+    renderMathIn(this.el);
   }
 
   private card(qz: Quiz): HTMLElement {

@@ -628,3 +628,9 @@ label.cm-field { cursor: pointer; }
 .cm-ai { container-type: inline-size; }
 .cm-ai__act span { display: none; }
 @container (min-width: 440px) { .cm-ai__act span { display: inline; } }
+
+/* ---------- Matematik (KaTeX) ---------- */
+.cm-math .katex { font-size: 1.05em; }
+.cm-math--block { margin: 8px 0; overflow-x: auto; overflow-y: hidden; text-align: center; }
+.cm-math.is-raw { font: 12px/18px var(--font-mono); color: var(--ink-muted); }
+.cm-ai__a .cm-math--block { padding: 6px 0; }

@@ -23,7 +23,8 @@ Cevap biçimi:
 - Belgeye dayanan her cümlenin sonuna kaynağını şu biçimde ekle: [s. SAYFA: "alıntı"]. Alıntı, o sayfanın metninde harfi harfine geçen 3–10 kelimelik bir parça olmalı.
 - Belgede olmayan genel bilgi eklersen o cümleye kaynak koyma; öğrenci kaynaksız cümleleri ayrıca kontrol edecek.
 - Belge sorunun cevabını içermiyorsa bunu açıkça söyle, uydurma.
-- Başlık ve tablo kullanma; paragraflar ve gerektiğinde "- " ile başlayan kısa maddeler yaz.`;
+- Başlık ve tablo kullanma; paragraflar ve gerektiğinde "- " ile başlayan kısa maddeler yaz.
+- Matematik ifadelerini LaTeX ile yaz: satır içinde $...$, ayrı satırda $$...$$ (örnek: $\mu_{\bar{A}}(x) = 1 - \mu_A(x)$). Düz para tutarı için $ kullanma.`;
 
 /** Kullanıcı mesajı: kapsam metni sayfa etiketleriyle, ardından soru. */
 export function userMessage(ctx: AiContext, question: string): string {

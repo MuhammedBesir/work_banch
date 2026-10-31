@@ -50,7 +50,8 @@ Cevabın YALNIZCA geçerli bir JSON nesnesi olsun (açıklama, Markdown ya da ko
   {"type": "open", "q": "klasik soru", "answer": "örnek iyi cevap (3-6 cümle)", "explanation": "puanlama ölçütleri", "page": 9}
  ]}
 Kurallar: "answer" mc'de doğru şıkkın 0'dan başlayan sırası; tf'de true/false. Şıklar birbirine yakın ve makul olsun, doğru şık rastgele yerde.
-"page" sorunun dayandığı sayfa numarası (metindeki <sayfa no="..."> değeri). Türkçe yaz (kullanıcı başka dil istemedikçe).`;
+"page" sorunun dayandığı sayfa numarası (metindeki <sayfa no="..."> değeri). Türkçe yaz (kullanıcı başka dil istemedikçe).
+Matematik ifadelerini LaTeX ile $...$ arasında yaz (JSON içinde ters bölüyü iki kez yaz: "$\\mu_A(x)$").`;
 
 export function quizPrompt(r: QuizRequest, typeNames: Record<QType, string>): string {
   const types = r.types.map((t) => typeNames[t]).join(", ");

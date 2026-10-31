@@ -44,7 +44,7 @@ const sw: Plugin = {
         const p = join(dir, f);
         if (statSync(p).isDirectory()) walk(p);
         // .woff2 yeterli; eski .woff kopyaları ve yalnızca AI açıkken gereken sağlayıcı SDK'ları ilk kullanımda saklanır.
-        else if (statSync(p).size < 2 * 1024 * 1024 && !/\.(map|woff)$/.test(f) && !/^(anthropic|openai)-/.test(f) && f !== "sw.js") files.push(relative(out, p).split("\\").join("/"));
+        else if (statSync(p).size < 2 * 1024 * 1024 && !/\.(map|woff|ttf)$/.test(f) && !/KaTeX_/.test(f) && !/^(anthropic|openai)-/.test(f) && f !== "sw.js") files.push(relative(out, p).split("\\").join("/"));
       }
     };
     walk(out);
