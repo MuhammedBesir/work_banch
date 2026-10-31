@@ -431,3 +431,64 @@ label.cm-field { cursor: pointer; }
 .cm-cover-swatch.is-on { outline: 2px solid var(--ink); outline-offset: 2px; }
 .cm-field-error { color: var(--danger, #a3221a); margin: 0; font-size: 13px; min-height: 18px; }
 .cm-pages__add { display: block; margin: 0 auto var(--space-6); }
+
+/* ---------- Yaz modu paleti: simgeler ---------- */
+.cm-icon { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.cm-stagewrap > .cm-palette { width: auto; padding: 6px; gap: 4px; border: 1px solid var(--line); border-radius: 14px; left: 12px; top: 12px; max-height: calc(100% - 24px); }
+.cm-palette__grid { display: grid; grid-template-columns: repeat(2, 40px); gap: 4px; }
+.cm-palette__grid--sub { padding: 2px; background: var(--paper); border-radius: 10px; }
+.cm-palette .cm-tool { width: 40px; height: 40px; min-height: 0; padding: 0; border-radius: 10px; color: var(--ink-muted); transition: background-color 120ms, color 120ms; }
+.cm-palette .cm-tool:hover:not(:disabled) { background: var(--paper); color: var(--ink); }
+.cm-palette .cm-tool.is-on { background: var(--accent); color: var(--on-accent); box-shadow: 0 1px 3px rgba(0,0,0,.18); }
+.cm-palette .cm-tool--sub { width: 40px; height: 34px; }
+.cm-palette .cm-tool--sub.is-on { background: var(--surface-raised); color: var(--accent); box-shadow: 0 0 0 1.5px var(--accent) inset; }
+.cm-palette .cm-tool:disabled { opacity: .35; }
+.cm-palette__sep { height: 1px; margin: 2px 4px; background: var(--line); }
+.cm-palette__colors { display: grid; grid-template-columns: repeat(3, 24px); gap: 6px; justify-content: center; padding: 2px 0; }
+.cm-palette__colors .cm-pen { width: 24px; height: 24px; margin: 0; box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); }
+.cm-palette .cm-pen.is-on { outline: 2px solid var(--accent); outline-offset: 2px; }
+.cm-pen--more { display: grid; place-items: center; background: conic-gradient(#e53935, #fdd835, #43a047, #1e88e5, #8e24aa, #e53935) !important; color: #fff; }
+.cm-pen--more .cm-icon { width: 14px; height: 14px; stroke-width: 2; filter: drop-shadow(0 0 1px rgba(0,0,0,.6)); }
+.cm-palette .cm-colorpick { grid-template-columns: repeat(3, 24px); gap: 6px; padding: 4px 0; }
+.cm-palette .cm-colorpick .cm-pen { width: 24px; height: 24px; }
+.cm-palette__widths { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; }
+.cm-palette .cm-width { height: 30px; border-radius: 8px; }
+.cm-palette .cm-width i { width: auto; border-radius: 50%; background: var(--ink-muted); }
+.cm-palette .cm-width.is-on { background: var(--accent-soft); }
+.cm-palette .cm-width.is-on i { background: var(--accent); }
+
+/* Seçim çubuğu: simgeler */
+.cm-selbox__bar { gap: 2px; padding: 4px; border-radius: 12px; }
+.cm-selbox__btn { width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--ink); cursor: pointer; }
+.cm-selbox__btn:hover { background: var(--paper); }
+.cm-selbox__btn[aria-label^="Sil"]:hover { color: var(--danger, #a3221a); }
+.cm-selbox__count { min-width: 24px; height: 24px; display: grid; place-items: center; border-radius: 12px; background: var(--accent); color: var(--on-accent); font-size: 12px; margin: 0 4px; }
+.cm-selbox { border-radius: 6px; }
+
+@media (max-width: 720px) {
+  .cm-stagewrap > .cm-palette { flex-direction: row; flex-wrap: nowrap; align-items: center; padding: 6px; border-radius: 14px; top: auto; left: var(--space-2); right: var(--space-2); bottom: var(--space-2); max-height: none; height: auto; overflow-x: auto; overflow-y: hidden; }
+  .cm-stagewrap > .cm-palette > * { flex: none; }
+  .cm-stagewrap > .cm-palette .cm-palette__grid--sub { grid-template-rows: 34px; }
+  .cm-stagewrap > .cm-palette .cm-colorpick { grid-auto-flow: column; grid-template-columns: none; grid-template-rows: repeat(2, 24px); }
+  .cm-stagewrap > .cm-palette .cm-palette__grid { grid-auto-flow: column; grid-template-columns: none; grid-template-rows: 40px; }
+  .cm-stagewrap > .cm-palette .cm-palette__colors, .cm-stagewrap > .cm-palette .cm-palette__widths { grid-auto-flow: column; grid-template-columns: none; align-content: center; }
+  .cm-stagewrap > .cm-palette .cm-palette__widths { grid-auto-columns: 30px; }
+  .cm-stagewrap > .cm-palette .cm-palette__sep { width: 1px; height: auto; align-self: stretch; margin: 4px 2px; }
+  .cm-stagewrap > .cm-palette .cm-tool { min-width: 40px; min-height: 40px; }
+  .cm-stagewrap > .cm-palette .cm-pen { margin: 0; width: 24px; height: 24px; }
+}
+
+/* ---------- Üst çubuk simgeleri, odak çerçevesi ---------- */
+.cm-btn--icon { width: 34px; min-width: 34px; padding: 0; display: inline-grid; place-items: center; }
+.cm-btn--withicon, .cm-btn--count { display: inline-flex; align-items: center; gap: 6px; }
+.cm-btn--count .cm-num { min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--paper); font-size: 12px; line-height: 18px; text-align: center; }
+.cm-btn--count.is-on .cm-num { background: var(--surface-raised); }
+.cm-btn.is-rec { color: #c62828; }
+.cm-btn.is-rec::before { content: none; }
+.cm-btn.is-rec .cm-icon { animation: cm-rec 1.2s ease-in-out infinite; }
+/* Belge alanının odak çerçevesi yalnızca klavyeyle (Tab) gelinince. */
+.cm-stage:focus-visible { box-shadow: none; }
+:root[data-kbd] .cm-stage:focus-visible { box-shadow: inset 0 0 0 2px var(--focus); }
+@media (max-width: 720px) {
+  .cm-stagewrap > .cm-palette > .cm-palette__grid:last-child { order: -1; }
+}

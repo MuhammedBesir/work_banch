@@ -1,7 +1,7 @@
 import type { Viewer } from "../pdf/viewer";
 import type { InkColor, Mark, PenKind, ShapeKind } from "../types";
 import { PEN_COLORS, PEN_KINDS } from "../types";
-import { h, isTyping, kbd, uid } from "../util";
+import { h, isTyping, uid } from "../util";
 import { SWATCHES, inkCss, isCustom } from "./colors";
 import {
   constrain, eraseInk, hitMark, inLasso, inkSlope, moveMark, penStyle, recognizeShape, rotateAround, scaleMark,
@@ -9,6 +9,7 @@ import {
 } from "./geometry";
 import { PEN_KIND_LABEL, PEN_LABEL, colorClass, colorLabel } from "./layer";
 import { applyFormat } from "./rich";
+import { icon } from "../ui/icons";
 
 export type Tool = "select" | "lasso" | "highlight" | "pen" | "text" | "sticky" | "shape" | "image" | "eraser";
 
@@ -176,17 +177,20 @@ export class WriteMode {
   }
 
   private renderPalette(): void {
-    const tool = ([t, label, key]: [Tool, string, string]) =>
-      h("button", { class: `cm-tool${this.tool === t ? " is-on" : ""}`, "aria-pressed": String(this.tool === t), title: `${label} (${key})`, onclick: () => this.setTool(t) }, label, kbd(key));
-    const sub = (on: boolean, label: string, run: () => void) =>
-      h("button", { class: `cm-tool cm-tool--sub${on ? " is-on" : ""}`, "aria-pressed": String(on), onclick: run }, label);
+    // Simgeli palet: ad ve kısayol ipucunda (title) ve ekran okuyucuda (aria-label).
+    const btn = (name: string, label: string, on: boolean, run: () => void, cls = "cm-tool") =>
+      h("button", { class: `${cls}${on ? " is-on" : ""}`, "aria-pressed": String(on), "aria-label": label, title: label, onclick: run }, icon(name));
+    const tool = ([t, label, key]: [Tool, string, string]) => btn(t, `${label} (${key})`, this.tool === t, () => this.setTool(t));
     const sep = () => h("div", { class: "cm-palette__sep" });
+    const group = (label: string, ...items: HTMLElement[]) => h("div", { class: "cm-palette__grid cm-palette__grid--sub", role: "group", "aria-label": label }, ...items);
     const subs = this.tool === "shape"
-      ? [sep(), ...SHAPES.map(([s, label]) => sub(this.shape === s, label, () => ((this.shape = s), this.renderPalette())))]
+      ? [sep(), group("Şekil", ...SHAPES.map(([s, label]) => btn(`shape-${s}`, label, this.shape === s, () => ((this.shape = s), this.renderPalette()), "cm-tool cm-tool--sub")))]
       : this.tool === "pen"
-        ? [sep(), ...PEN_KINDS.map((k) => sub(this.pen === k, PEN_KIND_LABEL[k], () => this.setPen(k)))]
+        ? [sep(), group("Kalem türü", ...PEN_KINDS.map((k) => btn(`pen-${k}`, PEN_KIND_LABEL[k], this.pen === k, () => this.setPen(k), "cm-tool cm-tool--sub")))]
         : this.tool === "eraser"
-          ? [sep(), sub(this.eraserMode === "partial", "Kısmi", () => ((this.eraserMode = "partial"), this.renderPalette())), sub(this.eraserMode === "stroke", "Bütün çizgi", () => ((this.eraserMode = "stroke"), this.renderPalette()))]
+          ? [sep(), group("Silgi",
+              btn("eraser-partial", "Kısmi silgi: yalnızca değdiği yer", this.eraserMode === "partial", () => ((this.eraserMode = "partial"), this.renderPalette()), "cm-tool cm-tool--sub"),
+              btn("eraser-stroke", "Bütün çizgiyi sil", this.eraserMode === "stroke", () => ((this.eraserMode = "stroke"), this.renderPalette()), "cm-tool cm-tool--sub"))]
           : [];
     const swatch = (c: InkColor, label: string) => {
       const b = h("button", { class: `cm-pen cm-pen--${colorClass(c)}${this.color === c ? " is-on" : ""}`, "aria-label": label, "aria-pressed": String(this.color === c), title: label, onclick: () => this.setColor(c) });
@@ -200,22 +204,28 @@ export class WriteMode {
           ...SWATCHES.map((c) => swatch(c as InkColor, `Renk ${c}`)),
           h("label", { class: "cm-colorpick__more", title: "Başka renk" }, "+", picker))
       : null;
+    const custom = this.custom.filter((c) => !PEN_COLORS.includes(c as never)).slice(0, 3);
     this.el.replaceChildren(
-      ...TOOLS.map(tool),
+      h("div", { class: "cm-palette__grid", role: "group", "aria-label": "Araçlar" }, ...TOOLS.map(tool)),
       ...subs,
       sep(),
-      ...PEN_COLORS.map((c, i) => swatch(c, `${PEN_LABEL[c]} (Shift ${i + 1})`)),
-      ...this.custom.filter((c) => !PEN_COLORS.includes(c as never)).slice(0, 4).map((c) => swatch(c as InkColor, `Özel renk ${c}`)),
-      h("button", { class: `cm-tool cm-tool--sub${this.colorsOpen ? " is-on" : ""}`, "aria-expanded": String(this.colorsOpen), onclick: () => ((this.colorsOpen = !this.colorsOpen), this.renderPalette()) }, "Renkler"),
+      h("div", { class: "cm-palette__colors", role: "group", "aria-label": "Renk" },
+        ...PEN_COLORS.map((c, i) => swatch(c, `${PEN_LABEL[c]} (Shift ${i + 1})`)),
+        ...custom.map((c) => swatch(c as InkColor, `Özel renk ${c}`)),
+        btn("colors", this.colorsOpen ? "Renkleri kapat" : "Daha fazla renk", this.colorsOpen, () => ((this.colorsOpen = !this.colorsOpen), this.renderPalette()), "cm-pen cm-pen--more"),
+      ),
       ...(colors ? [colors] : []),
-      h("div", { class: "cm-palette__sep" }),
-      ...WIDTHS.map((w) => {
-        const b = h("button", { class: `cm-width${this.width === w ? " is-on" : ""}`, "aria-label": `Kalınlık ${w}`, "aria-pressed": String(this.width === w), onclick: () => this.setWidth(w) }, h("i"));
-        (b.firstChild as HTMLElement).style.height = `${w + 0.5}px`;
+      sep(),
+      h("div", { class: "cm-palette__widths", role: "group", "aria-label": "Kalınlık" }, ...WIDTHS.map((w, i) => {
+        const b = h("button", { class: `cm-width${this.width === w ? " is-on" : ""}`, "aria-label": `Kalınlık: ${["ince", "orta", "kalın"][i]}`, title: `Kalınlık: ${["ince", "orta", "kalın"][i]}`, "aria-pressed": String(this.width === w), onclick: () => this.setWidth(w) }, h("i"));
+        (b.firstChild as HTMLElement).style.cssText = `width:${w * 2 + 3}px;height:${w * 2 + 3}px`;
         return b;
-      }),
-      h("div", { class: "cm-palette__sep" }),
-      h("button", { class: "cm-tool", title: "Geri al (Ctrl Z)", disabled: !this.undoStack.length, onclick: () => this.undo() }, "Geri al", kbd("Ctrl Z")),
+      })),
+      sep(),
+      h("div", { class: "cm-palette__grid" },
+        h("button", { class: "cm-tool", "aria-label": "Geri al (Ctrl Z)", title: "Geri al (Ctrl Z)", disabled: !this.undoStack.length, onclick: () => this.undo() }, icon("undo")),
+        h("button", { class: "cm-tool", "aria-label": "Yinele (Ctrl Shift Z)", title: "Yinele (Ctrl Shift Z)", disabled: !this.redoStack.length, onclick: () => this.redo() }, icon("redo")),
+      ),
     );
   }
 
@@ -327,14 +337,26 @@ export class WriteMode {
     if (this.editingId && target.closest("[contenteditable]")) return;
     if (target.dataset.handle) return this.resizeText(e, target.dataset.handle);
     if (target.dataset.scale) return this.scaleSelection(e, target.dataset.scale);
-    // Avuç reddi: parmak yalnızca kaydırır.
-    if (e.pointerType === "touch") return this.fingerScroll(e);
     const at = this.pageAt(e);
+    if (e.pointerType === "touch") {
+      // Seç ve Kement araçlarında parmak da seçer ve taşır; boş yerde kaydırır.
+      if (at && this.tool === "lasso") {
+        e.preventDefault();
+        return this.lasso(e, at);
+      }
+      const onMark = at && (target.closest(".cm-selbox") || this.hitAt(at));
+      if (!(this.tool === "select" && onMark)) {
+        // Avuç reddi: çizim araçlarında parmak yalnızca kaydırır; bir işaretin üstünde basılı tutunca seçer.
+        return this.fingerScroll(e, at && this.tool !== "select" ? at : null);
+      }
+    }
     if (!at) return;
     this.finishEditing();
     e.preventDefault();
     if (penEraser) return this.erase(e, at);
-    if (target.closest(".cm-selbox") && (this.tool === "select" || this.tool === "lasso")) return this.dragSelection(e, at);
+    if (target.closest(".cm-selbox")) return this.dragSelection(e, at);
+    // Metin ve Not araçlarında var olan kutuya basınca yenisi açılmaz: sürükleyince taşınır, tıklayınca düzenlenir.
+    if ((this.tool === "text" || this.tool === "sticky") && target.closest(".cm-textbox, .cm-sticky")) return this.pick(e, at, true);
     switch (this.tool) {
       case "pen": return this.drawInk(e, at);
       case "shape": return this.drawShape(e, at);
@@ -353,18 +375,38 @@ export class WriteMode {
     if (el?.dataset.id) this.edit(el.dataset.id);
   };
 
-  private fingerScroll(e: PointerEvent): void {
+  /** Sayfadaki noktaya en üstteki işaret. */
+  private hitAt(at: NonNullable<ReturnType<WriteMode["pageAt"]>>): Mark | undefined {
+    return [...this.actions.marks()].reverse().find((m) => m.page === at.page && hitMark(m, at.x, at.y, at.w, at.h, 14));
+  }
+
+  /**
+   * Parmakla kaydırma. `hold` verilirse: bir işaretin üstünde ~0,45 sn kıpırdamadan basılı tutunca
+   * Seç aracına geçilir ve o işaret seçilir (sonra sürükleyerek taşınır).
+   */
+  private fingerScroll(e: PointerEvent, hold: NonNullable<ReturnType<WriteMode["pageAt"]>> | null = null): void {
     const stage = this.viewer.stage;
     let lx = e.clientX;
     let ly = e.clientY;
+    const x0 = e.clientX;
+    const y0 = e.clientY;
+    const hit = hold ? this.hitAt(hold) : undefined;
+    const timer = hit ? window.setTimeout(() => {
+      this.setTool("select");
+      this.select(hit.id);
+      navigator.vibrate?.(15);
+      this.actions.announce("Seçildi; sürükleyerek taşı");
+    }, 450) : 0;
     const move = (ev: PointerEvent) => {
       if (ev.pointerId !== e.pointerId) return;
+      if (Math.hypot(ev.clientX - x0, ev.clientY - y0) > 8) clearTimeout(timer);
       stage.scrollBy(lx - ev.clientX, ly - ev.clientY);
       lx = ev.clientX;
       ly = ev.clientY;
     };
     const up = (ev: PointerEvent) => {
       if (ev.pointerId !== e.pointerId) return;
+      clearTimeout(timer);
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
@@ -425,6 +467,19 @@ export class WriteMode {
     let hold = 0;
     let anchor: [number, number] | null = null;
     let shaped = null as Recognized | null;
+    // Bir işaretin üstünde kıpırdamadan basılı tutmak: çizme, o işareti seç (taşımak için).
+    const under = this.hitAt(at);
+    let picked = false;
+    const pickTimer = under ? window.setTimeout(() => {
+      const [x0, y0] = pts[0] ?? [at.x, at.y];
+      if (pts.some(([x, y]) => Math.hypot((x - x0) * at.w, (y - y0) * at.h) > 4)) return;
+      picked = true;
+      live.done();
+      this.setTool("select");
+      this.select(under.id);
+      navigator.vibrate?.(15);
+      this.actions.announce("Seçildi; sürükleyerek taşı");
+    }, 450) : 0;
     const arm = () => {
       clearTimeout(hold);
       hold = window.setTimeout(() => {
@@ -437,7 +492,7 @@ export class WriteMode {
       }, HOLD_MS);
     };
     this.track(e, at.el, (list) => {
-      if (shaped) return;
+      if (shaped || picked) return;
       for (const [x, y, p] of list) {
         d += `${pts.length ? " L" : "M"}${x.toFixed(5)} ${y.toFixed(5)}`;
         pts.push([x, y]);
@@ -450,8 +505,9 @@ export class WriteMode {
       path.setAttribute("d", d);
     }, () => {
       clearTimeout(hold);
+      clearTimeout(pickTimer);
       live.done();
-      if (!pts.length) return;
+      if (!pts.length || picked) return;
       const now = Date.now();
       const base = { id: uid(), fileHash: this.fileHash, page: at.page, createdAt: now, updatedAt: now };
       let m: Mark;
@@ -590,16 +646,20 @@ export class WriteMode {
     if (sel.marks.length === 1 && (sel.marks[0].kind === "text" || sel.marks[0].kind === "sticky")) return;
     const [x, y, w, hh] = unionBox(sel.marks)!;
     const ink = sel.marks.filter((m) => m.kind === "ink");
-    const btn = (label: string, run: () => void, title = label) =>
-      h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm", title, onclick: (ev: Event) => (ev.stopPropagation(), run()) }, label);
+    const btn = (name: string, title: string, run: () => void) =>
+      h("button", { class: "cm-selbox__btn", title, "aria-label": title, onclick: (ev: Event) => (ev.stopPropagation(), run()) }, icon(name));
+    const recolor = btn("recolor", `Seçimi ${colorLabel(this.color)} yap`, () => this.recolorSelected(this.color));
+    recolor.style.color = inkCss(this.color);
     const bar = h("div", { class: "cm-selbox__bar", role: "toolbar", "aria-label": "Seçim" },
-      h("span", { class: "cm-num cm-selbox__count", text: `${sel.marks.length}` }),
-      btn("Renk", () => this.recolorSelected(this.color), `Seçimi ${colorLabel(this.color)} yap`),
-      ink.length ? btn("Düzleştir", () => this.straighten()) : null,
-      ink.length && this.actions.handwriting ? btn("Metne çevir", () => this.actions.handwriting!(ink, sel.page, "text")) : null,
-      ink.length && this.actions.handwriting ? btn("Matematik", () => this.actions.handwriting!(ink, sel.page, "math"), "Matematiği çöz") : null,
-      btn("Çoğalt", () => this.duplicate()),
-      btn("Sil", () => this.deleteSelected()),
+      h("span", { class: "cm-num cm-selbox__count", title: "Seçili işaret", text: `${sel.marks.length}` }),
+      recolor,
+      ...(ink.length ? [btn("straighten", "Düzleştir", () => this.straighten())] : []),
+      ...(ink.length && this.actions.handwriting ? [
+        btn("totext", "Metne çevir", () => this.actions.handwriting!(ink, sel.page, "text")),
+        btn("math", "Matematiği çöz", () => this.actions.handwriting!(ink, sel.page, "math")),
+      ] : []),
+      btn("copy", "Çoğalt", () => this.duplicate()),
+      btn("trash", "Sil (Del)", () => this.deleteSelected()),
     );
     const box = h("div", { class: "cm-selbox", "aria-hidden": "false" },
       ...["nw", "ne", "sw", "se"].map((c) => h("span", { class: `cm-selbox__h cm-selbox__h--${c}`, "data-scale": c, "aria-hidden": "true" })),
@@ -759,7 +819,7 @@ export class WriteMode {
     this.actions.announce("Resim eklendi");
   }
 
-  private pick(e: PointerEvent, at: NonNullable<ReturnType<WriteMode["pageAt"]>>): void {
+  private pick(e: PointerEvent, at: NonNullable<ReturnType<WriteMode["pageAt"]>>, editOnClick = false): void {
     const hit = [...this.actions.marks()].reverse().find((m) => m.page === at.page && hitMark(m, at.x, at.y, at.w, at.h));
     if (e.shiftKey) {
       if (hit) this.select(hit.id, true);
@@ -783,6 +843,7 @@ export class WriteMode {
       const dy = last[1] - start[1];
       if (Math.abs(dx * at.w) < 2 && Math.abs(dy * at.h) < 2) {
         el.forEach((n) => ((n as HTMLElement).style.translate = ""));
+        if (editOnClick && (hit.kind === "text" || hit.kind === "sticky")) this.edit(hit.id);
         return;
       }
       const ops: Op[] = moving.map((m) => ({ before: m, after: { ...moveMark(m, dx, dy), updatedAt: Date.now() } }));

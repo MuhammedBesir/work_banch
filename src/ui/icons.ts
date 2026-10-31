@@ -1,0 +1,61 @@
+// Yaz modu simgeleri: 20×20, çizgi (currentColor). Metin yerine simge; ad ve kısayol ipucunda ve ekran okuyucuda.
+
+const SVG = "http://www.w3.org/2000/svg";
+
+const PATHS: Record<string, string> = {
+  select: "M5 3l10 6.2-4.4 1.1L13.3 16l-2 1-2.7-5.6L5 14.7z",
+  lasso: "M10 4c4.4 0 7 1.8 7 4s-2.6 4-7 4-7-1.8-7-4 2.6-4 7-4zM6 11.5c-.8.8-1 1.8-.6 2.6.6 1.1 2.2 1.4 3.3.6M8.7 14.7c-.4 1-.2 2 .6 2.8",
+  highlight: "M12.5 3.5l4 4-7.5 7.5H5v-4zM10.5 5.5l4 4M3 18h14",
+  pen: "M14 3l3 3-9.5 9.5L4 17l1.5-3.5zM12 5l3 3",
+  text: "M5 5h10M10 5v11M7.5 16h5",
+  sticky: "M4 4h12v8l-4 4H4zM12 16v-4h4",
+  shape: "M3.5 10.5h6v6h-6zM14 3.5a3.5 3.5 0 110 7 3.5 3.5 0 010-7z",
+  image: "M3 4h14v12H3zM3 13l4-4 3 3 2-2 5 5M13.5 7.5a1 1 0 11-.01 0",
+  eraser: "M8 16h9M4.5 12.5l7-7.5 4.5 4.5-6.5 6.5H7.5z M8 9l4.5 4.5",
+  undo: "M7 5L3.5 8.5 7 12M4 8.5h8a4.5 4.5 0 010 9H9",
+  redo: "M13 5l3.5 3.5L13 12M16 8.5H8a4.5 4.5 0 000 9h3",
+  colors: "M10 3a7 7 0 100 14c1 0 1.5-.6 1.5-1.4 0-1.2-1-1.3-1-2.3 0-.8.6-1.3 1.5-1.3H14a3 3 0 003-3C17 5.6 13.9 3 10 3zM6.5 9.5h.01M8.5 6.5h.01M12 6.5h.01",
+  // kalem türleri
+  "pen-pen": "M14 3l3 3-9.5 9.5L4 17l1.5-3.5z",
+  "pen-pencil": "M14 3l3 3-9.5 9.5L4 17l1.5-3.5zM5.5 13.5l1 1M12 5l3 3",
+  "pen-marker": "M12 3l5 5-6 6H8l-2-2v-3zM6 12l-3 5h5",
+  "pen-fountain": "M10 2.5l4.5 6-4.5 9-4.5-9zM10 8.5v4M10 12.5a.6.6 0 110 .01",
+  // şekiller
+  "shape-rect": "M4 5h12v10H4z",
+  "shape-ellipse": "M10 4c4.4 0 7 2.7 7 6s-2.6 6-7 6-7-2.7-7-6 2.6-6 7-6z",
+  "shape-arrow": "M4 16L16 4M9 4h7v7",
+  // silgi
+  "eraser-partial": "M8 16h9M4.5 12.5l7-7.5 4.5 4.5-6.5 6.5H7.5zM2.5 4.5h3",
+  "eraser-stroke": "M8 16h9M4.5 12.5l7-7.5 4.5 4.5-6.5 6.5H7.5zM2 6c2-3 4 0 6-3",
+  // seçim çubuğu
+  recolor: "M10 3.5S5 9 5 12a5 5 0 0010 0c0-3-5-8.5-5-8.5z",
+  straighten: "M3 7c3-3 5 3 8 0s4-2 6-1M3 14h14",
+  totext: "M3 6c1.5-2 3 2 4.5 0S10 4 11 5M4 11h5M6.5 11v6M12 14h5m-2-2l2 2-2 2",
+  math: "M3 10h3l2 6 3-12h6M12 9l4 5M16 9l-4 5",
+  copy: "M7 7h9v9H7zM4 13V4h9",
+  trash: "M4 6h12M8 6V4h4v2M6 6l1 11h6l1-11",
+  play: "M6 4l10 6-10 6z",
+  // üst çubuk
+  search: "M8.5 3.5a5 5 0 110 10 5 5 0 010-10zM12.2 12.2L16.5 16.5",
+  moon: "M15.5 12.5A6.5 6.5 0 017.5 4.5a6.5 6.5 0 108 8z",
+  sun: "M10 6.5a3.5 3.5 0 110 7 3.5 3.5 0 010-7zM10 2v2M10 16v2M2 10h2M16 10h2M4.3 4.3l1.4 1.4M14.3 14.3l1.4 1.4M4.3 15.7l1.4-1.4M14.3 5.7l1.4-1.4",
+  focus: "M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4",
+  mic: "M10 2.5a2.5 2.5 0 012.5 2.5v5a2.5 2.5 0 01-5 0V5A2.5 2.5 0 0110 2.5zM5 9.5a5 5 0 0010 0M10 14.5V17.5",
+  sparkle: "M10 2.5l1.6 4.4 4.4 1.6-4.4 1.6L10 14.5l-1.6-4.4L4 8.5l4.4-1.6zM15.5 13l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z",
+  panel: "M3 4h14v12H3zM12.5 4v12",
+  rail: "M3 4h14v12H3zM7.5 4v12",
+  export: "M10 3v9M6.5 6.5L10 3l3.5 3.5M4 11v5h12v-5",
+};
+
+export function icon(name: keyof typeof PATHS | string): SVGSVGElement {
+  const svg = document.createElementNS(SVG, "svg");
+  svg.setAttribute("viewBox", "0 0 20 20");
+  svg.setAttribute("width", "20");
+  svg.setAttribute("height", "20");
+  svg.setAttribute("aria-hidden", "true");
+  svg.classList.add("cm-icon");
+  const p = document.createElementNS(SVG, "path");
+  p.setAttribute("d", PATHS[name] ?? "");
+  svg.append(p);
+  return svg;
+}

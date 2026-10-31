@@ -17,6 +17,7 @@ import { readingOrder } from "./geometry";
 import { editMark, editRect } from "./editor/transform";
 import { recognizeCanvas, recognizePage, stopOcr, type OcrPage } from "./ocr/ocr";
 import { openHandwriting } from "./ui/handwriting";
+import { icon } from "./ui/icons";
 import { AudioBar } from "./audio/bar";
 import { canLiveTranscribe, canRecord, clock, Recorder } from "./audio/recorder";
 import { openTranscript } from "./audio/transcript";
@@ -31,7 +32,7 @@ import { PageEditor, type EditPage } from "./editor/pageEditor";
 import { chatMarkdown, type AiContext, type Cite, type SavedTurn } from "./ai/prompt";
 import type { AiSettings, Card, Color, FileRecord, Highlight, Mark, Rect, Settings, Recording } from "./types";
 import { COLORS } from "./types";
-import { announce, download, h, isTyping, kbd, sha256, uid } from "./util";
+import { announce, download, h, isTyping, sha256, uid } from "./util";
 import { confirmDialog } from "./ui/dialog";
 import { AiPanel, type Scope } from "./ui/ai";
 import { askPassword, BIG_BYTES, BIG_PAGES, confirmBigFile, openAiSetup, openExport, openSettings, openShortcuts } from "./ui/dialogs";
@@ -149,7 +150,10 @@ function applySettings(): void {
   setErrorLog(settings.errorLog);
   if (reader) {
     reader.body.style.setProperty("--panel-width", `${settings.panelWidth}px`);
-    reader.themeBtn.textContent = resolvedTheme() === "dark" ? "Açık tema" : "Koyu tema";
+    const dark = resolvedTheme() === "dark";
+    reader.themeBtn.replaceChildren(icon(dark ? "sun" : "moon"));
+    reader.themeBtn.setAttribute("aria-label", dark ? "Açık tema" : "Koyu tema");
+    reader.themeBtn.title = dark ? "Açık tema" : "Koyu tema";
     reader.panel.setData(highlights, settings.names, marks);
     updateAiUi();
   }
@@ -827,7 +831,7 @@ async function openReader(file: OpenDoc): Promise<void> {
   const ghost = (label: string | Node, attrs: Record<string, string | EventListener> = {}, ...rest: Node[]) =>
     h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm", ...attrs }, label, ...rest);
 
-  const railBtn = ghost("Sayfalar", { class: "cm-btn cm-btn--ghost cm-btn--sm is-desk", title: "Sayfa şeridi ( [ )", "aria-pressed": String(railOpen), onclick: () => toggleRail() });
+  const railBtn = ghost(icon("rail"), { class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--icon is-desk", title: "Sayfa şeridi ( [ )", "aria-label": "Sayfa şeridi", "aria-pressed": String(railOpen), onclick: () => toggleRail() });
   const fileBtn = h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm cm-bar__file", title: file.rec.name, "aria-haspopup": "menu", text: file.rec.name });
   const fileMenu = (anchor: HTMLElement, mobile = false) => openMenu(anchor, [
     ...(mobile ? [
@@ -877,13 +881,16 @@ async function openReader(file: OpenDoc): Promise<void> {
     { label: "Sürekli kaydırma", on: viewer.scrollMode === "continuous", run: () => setScrollMode("continuous") },
     { label: "Sayfa sayfa", hint: "slaytlar", on: viewer.scrollMode === "paged", run: () => setScrollMode("paged") },
   ]));
-  const themeBtn = ghost("Koyu tema", { class: "cm-btn cm-btn--ghost cm-btn--sm is-wide", onclick: () => void changeSettings({ ...settings, theme: resolvedTheme() === "dark" ? "light" : "dark" }) });
-  const panelBtn = ghost("İşaretler ", { title: "İşaretler paneli ( ] )", "aria-pressed": String(panelOpen), onclick: () => {
+  // Üst çubuk: sık kullanılan düğmeler simge; ad ve kısayol ipucunda ve ekran okuyucuda.
+  const iconBtn = (name: string, label: string, attrs: Record<string, string | EventListener> = {}) =>
+    h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--icon", "aria-label": label, title: label, ...attrs }, icon(name));
+  const themeBtn = iconBtn("moon", "Koyu tema", { class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--icon is-wide", onclick: () => void changeSettings({ ...settings, theme: resolvedTheme() === "dark" ? "light" : "dark" }) });
+  const panelBtn = ghost(icon("panel"), { class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--count", title: "İşaretler paneli ( ] )", "aria-label": "İşaretler", "aria-pressed": String(panelOpen), onclick: () => {
     if (panelOpen && rightTab !== "marks") showRightTab("marks");
     else togglePanel();
   } }, h("span", { class: "cm-num", text: num(highlights.length) }));
   // Dışa aktar menüsü: Markdown notları, vurgulu PDF ve Tekrar modu girişi.
-  const exportBtn = h("button", { class: "cm-btn cm-btn--sm", "aria-haspopup": "menu" }, "Dışa aktar");
+  const exportBtn = h("button", { class: "cm-btn cm-btn--sm cm-btn--withicon", "aria-haspopup": "menu", "aria-label": "Dışa aktar", title: "Dışa aktar" }, icon("export"), h("span", { class: "is-wide", text: "Dışa aktar" }));
   exportBtn.addEventListener("click", () => openMenu(exportBtn, [
     { label: "Markdown notları…", hint: ".md", run: () => exportDialog("md") },
     { label: "Vurgulu PDF…", hint: ".pdf", run: () => exportDialog("pdf") },
@@ -895,9 +902,9 @@ async function openReader(file: OpenDoc): Promise<void> {
     "sep",
     { label: "Tekrar et", shortcut: "Alt T", run: () => openReview() },
   ], "right"));
-  const recBtn = ghost("Kayıt", { title: "Ses kaydı (Alt R)", "aria-haspopup": "menu" });
+  const recBtn = iconBtn("mic", "Ses kaydı (Alt R)", { "aria-haspopup": "menu" });
   recBtn.addEventListener("click", () => recordMenu(recBtn));
-  const aiBtn = ghost("AI", { title: "AI paneli (Ctrl J)", "aria-pressed": "false", onclick: () => toggleAi() });
+  const aiBtn = ghost(icon("sparkle"), { class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--withicon", title: "AI paneli (Ctrl J)", "aria-label": "AI paneli", "aria-pressed": "false", onclick: () => toggleAi() }, h("span", { text: "AI" }));
   const sep = () => h("span", { class: "cm-bar__sep" });
 
   const bar = h("header", { class: "cm-bar", role: "toolbar", "aria-label": "Okuyucu araç çubuğu" },
@@ -919,9 +926,9 @@ async function openReader(file: OpenDoc): Promise<void> {
     ),
     h("span", { class: "cm-bar__spacer" }),
     h("div", { class: "cm-bar__group is-reader is-desk" },
-      ghost("Ara ", { onclick: () => search.open(window.getSelection()?.toString().trim() || undefined) }, kbd("Ctrl F")),
+      iconBtn("search", "Ara (Ctrl F)", { onclick: () => search.open(window.getSelection()?.toString().trim() || undefined) }),
       themeBtn,
-      ghost("Odak ", { class: "cm-btn cm-btn--ghost cm-btn--sm is-wide", onclick: () => setFocus(!focusMode) }, kbd("F")),
+      iconBtn("focus", "Odak modu (F)", { class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--icon is-wide", onclick: () => setFocus(!focusMode) }),
       exportBtn,
       sep(),
       recBtn,
@@ -1605,6 +1612,7 @@ async function setMode(mode: Mode): Promise<void> {
     r.write.disable();
     r.write.el.hidden = true;
     r.root.classList.remove("is-write");
+    r.viewer.setReserveLeft(0);
     // El yazısı bir kez aranabilir yapıldıysa değişen sayfalar arka planda yeniden tanınır.
     if (hwPages.size) void runHandwriting(true);
   }
@@ -1631,6 +1639,8 @@ async function setMode(mode: Mode): Promise<void> {
     r.root.classList.add("is-write");
     r.write.el.hidden = false;
     r.write.enable();
+    // Masaüstünde palet solda yüzer: sayfalar onun kadar sağa kayar (telefonda palet altta).
+    if (!matchMedia("(max-width: 720px)").matches) r.viewer.setReserveLeft(r.write.el.offsetWidth + 16);
     announce("Yaz modu");
   } else {
     announce("Oku modu");
@@ -2112,6 +2122,10 @@ function addAiNote(page: number, text: string): void {
 }
 
 // ---------- Klavye ----------
+
+// Odak çerçevesi yalnızca klavyeyle gezinirken (Tab); fare ve dokunuşta gizlenir.
+document.addEventListener("keydown", (e) => e.key === "Tab" && (document.documentElement.dataset.kbd = "1"), true);
+document.addEventListener("pointerdown", () => delete document.documentElement.dataset.kbd, true);
 
 document.addEventListener("keydown", (e) => {
   const ctrl = e.ctrlKey || e.metaKey;

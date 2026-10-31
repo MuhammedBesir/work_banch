@@ -176,7 +176,7 @@ export class Viewer {
 
   private fitScale(): void {
     if (this.zoomMode === "custom") return;
-    const availW = Math.max(200, this.stage.clientWidth - PAD_X * 2);
+    const availW = Math.max(200, this.stage.clientWidth - PAD_X * 2 - this.reserveLeft);
     const availH = Math.max(200, this.stage.clientHeight - GAP * 2);
     const ref = this.pages[this.current] ?? this.pages[0];
     const byWidth = availW / this.maxWidth();
@@ -195,7 +195,8 @@ export class Viewer {
       this.tops.push(y);
       y += hgt + GAP;
     }
-    this.root.style.minWidth = `${Math.round(this.maxWidth() * this.scale) + PAD_X * 2}px`;
+    this.root.style.minWidth = `${Math.round(this.maxWidth() * this.scale) + PAD_X * 2 + this.reserveLeft}px`;
+    this.root.style.paddingLeft = this.reserveLeft ? `${PAD_X + this.reserveLeft}px` : "";
     this.root.style.setProperty("--z", String(this.scale)); // Yaz modu katmanı zoom ile ölçeklenir
     this.root.classList.toggle("is-paged", this.scrollMode === "paged");
     for (const p of this.pages) this.drawHighlights(p.index);
@@ -246,6 +247,19 @@ export class Viewer {
     if (mode === "paged" && this.zoomMode === "width") this.zoomMode = "page";
     this.setZoom(this.zoomMode, this.scale);
     this.goTo(this.current, "instant");
+  }
+
+  /** Soldan ayrılan boşluk (Yaz modu paleti sayfanın üstüne binmesin). */
+  private reserveLeft = 0;
+  setReserveLeft(px: number): void {
+    if (px === this.reserveLeft) return;
+    this.reserveLeft = px;
+    const a = this.anchor();
+    this.fitScale();
+    this.layout();
+    this.restore(a);
+    this.scheduleRender();
+    this.events.zoomChange();
   }
 
   private onResize = () => {

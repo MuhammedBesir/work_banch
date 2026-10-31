@@ -83,6 +83,7 @@ Tek tarayıcı için `npx playwright test --project=chromium` (projeler: `chromi
 
 - **Kalem türleri:** tükenmez, kurşun kalem, fosforlu (yarı saydam), dolma kalem (açılı uç, yöne göre kalınlık). Üç hazır renk + 12 özel ton ve renk seçici; son kullanılan özel renkler palette kalır.
 - **Kısmi silgi** (çizginin değdiği kısmı siler) ya da **bütün çizgi**. Kalemin yan tuşu ya da silgi ucu basılıyken geçici silgi.
+- **Taşıma:** Seç aracında (`V`) işarete basıp sürükle; parmakla da olur. Herhangi bir araçta bir yazının ya da şeklin üstünde kıpırdamadan basılı tutunca (~0,5 sn) seçilir. Metin aracında var olan kutuyu sürükleyince taşınır, tıklayınca düzenlenir.
 - **Kement** (`L`): çizerek seç; seçim kutusunun köşesinden **boyutlandır** (`Shift` oranı korur), sürükleyerek taşı, **renk değiştir**, çoğalt, sil.
 - **Çiz ve bekle:** kalemi bir an yerinde tutunca düz çizgi, üçgen, dörtgen, dikdörtgen ve elips düzeltilir.
 - **El yazısını düzleştir**, **metne çevir** ve **matematiği çöz** (kement çubuğundan): bu cihazda (OCR) ya da görsel destekleyen AI ile (Claude, OpenAI; yalnızca seçimin görseli gider).
