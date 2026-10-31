@@ -392,6 +392,12 @@ export function openAiSetup(current: AiSettings, save: (ai: AiSettings) => void,
         try {
           const { listModels } = await import("../ai/gemini");
           const list = await listModels(ai.keys.gemini);
+          // Takma ad (…-latest) yoğun önizleme modeline gidebiliyor: hesabın en yeni kararlı Flash modelini öner.
+          if (/-latest$/.test(ai.models.gemini)) {
+            const ver = (id: string) => Number(/gemini-(\d+(?:\.\d+)?)/.exec(id)?.[1] ?? 0);
+            const stable = list.map((m) => m.id).filter((id) => /flash/.test(id) && !/lite|preview|exp|latest/.test(id)).sort((a, b) => ver(b) - ver(a))[0];
+            if (stable) ai.models.gemini = stable;
+          }
           const opts = [...AI_PROVIDERS.gemini.models.map(([id, l]) => ({ id, label: l })), ...list.filter((m) => !AI_PROVIDERS.gemini.models.some(([id]) => id === m.id))];
           sel.replaceChildren(...opts.map((m) => h("option", { value: m.id, text: m.label === m.id ? m.id : `${m.label} · ${m.id}`, selected: m.id === ai.models.gemini })));
           status.textContent = `Anahtar çalışıyor · ${list.length} model bulundu.`;

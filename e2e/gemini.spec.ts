@@ -46,10 +46,12 @@ test("Gemini yoğunken (503) yeniden dener ve daha hafif modele geçer", async (
   test.skip(browserName !== "chromium", "ağ taklidi bir tarayıcıda yeterli");
   test.setTimeout(60_000);
   const calls: string[] = [];
+  await page.route("https://generativelanguage.googleapis.com/v1beta/models?*", (route) =>
+    route.fulfill({ json: { models: ["gemini-3-flash-preview", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"].map((id) => ({ name: `models/${id}`, supportedGenerationMethods: ["generateContent"] })) } }));
   await page.route("https://generativelanguage.googleapis.com/v1beta/models/*:streamGenerateContent*", async (route) => {
     const model = /models\/([^:]+):/.exec(route.request().url())![1];
     calls.push(model);
-    if (model === "gemini-pro-latest") {
+    if (model === "gemini-pro-latest" || model === "gemini-flash-latest") {
       await route.fulfill({ status: 503, json: { error: { code: 503, message: "The model is overloaded. Please try again later.", status: "UNAVAILABLE" } } });
       return;
     }
@@ -71,6 +73,7 @@ test("Gemini yoğunken (503) yeniden dener ve daha hafif modele geçer", async (
   await page.keyboard.press("Control+j");
   await page.getByRole("button", { name: "Bu sayfayı özetle" }).click();
   await expect(page.locator(".cm-ai")).toContainText("Yedek modelden cevap.", { timeout: 20_000 });
-  await expect(page.locator(".cm-ai")).toContainText("gemini-pro-latest yoğundu; bu cevap gemini-flash-latest ile verildi.");
-  expect(calls).toEqual(["gemini-pro-latest", "gemini-pro-latest", "gemini-pro-latest", "gemini-flash-latest"]);
+  // Önizleme ve takma ad değil, hesabın kararlı Flash modeli seçilir.
+  await expect(page.locator(".cm-ai")).toContainText("gemini-pro-latest yoğundu; bu cevap gemini-2.5-flash ile verildi.");
+  expect(calls).toEqual(["gemini-pro-latest", "gemini-pro-latest", "gemini-pro-latest", "gemini-2.5-flash"]);
 });

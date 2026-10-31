@@ -26,8 +26,32 @@ async function fail(res: Response): Promise<never> {
   throw new GeminiError(res.status, reason, message);
 }
 
-/** Yoğunlukta (500, 503) sırayla denenecek daha hafif modeller. */
+/** Yoğunlukta denenecek takma adlar (hesabın model listesi alınamazsa). */
 const FALLBACKS = ["gemini-flash-latest", "gemini-flash-lite-latest"];
+
+const version = (id: string) => Number(/gemini-(\d+(?:\.\d+)?)/.exec(id)?.[1] ?? 0);
+
+/**
+ * Yedek zinciri: önce hesabın gerçekten kullanabildiği kararlı (önizleme olmayan) Flash modelleri,
+ * yeniden eskiye, sonra Flash-Lite; liste alınamazsa takma adlar. Takma ad (…-latest) yoğun önizleme
+ * modeline gidebildiği için kararlı sürümler öne alınır.
+ */
+let chainCache: { key: string; list: string[] } | null = null;
+async function fallbackChain(apiKey: string, model: string): Promise<string[]> {
+  let stable: string[] = [];
+  try {
+    if (chainCache?.key !== apiKey) {
+      const all = (await listModels(apiKey)).map((m) => m.id).filter((id) => !/preview|exp|latest|thinking|tuning/.test(id));
+      const flash = all.filter((id) => /flash/.test(id) && !/lite/.test(id)).sort((a, b) => version(b) - version(a));
+      const lite = all.filter((id) => /flash-lite/.test(id)).sort((a, b) => version(b) - version(a));
+      chainCache = { key: apiKey, list: [...flash, ...lite] };
+    }
+    stable = chainCache.list;
+  } catch {
+    /* liste alınamadı: takma adlar */
+  }
+  return [...new Set([model, ...stable.slice(0, 3), ...FALLBACKS])];
+}
 const busy = (e: unknown) => e instanceof GeminiError && (e.status === 500 || e.status === 503 || e.status === 504);
 const wait = (ms: number, signal: AbortSignal) => new Promise<void>((resolve, reject) => {
   const t = setTimeout(resolve, ms);
@@ -39,10 +63,12 @@ const wait = (ms: number, signal: AbortSignal) => new Promise<void>((resolve, re
  * Cevap başladıktan sonra yinelenmez (metin iki kez yazılmasın).
  */
 async function stream(model: string, apiKey: string, body: unknown, signal: AbortSignal, onText: (t: string) => void, onModel?: (m: string) => void): Promise<AskResult> {
-  const chain = [model, ...FALLBACKS.filter((m) => m !== model)];
+  let chain = [model];
   let last: unknown;
-  for (const m of chain) {
-    for (const delay of [0, 1500, 4000]) {
+  for (let i = 0; i < chain.length; i++) {
+    const m = chain[i];
+    // Seçilen model iki kez yinelenir; yedekler birer kez.
+    for (const delay of i === 0 ? [0, 1500, 4000] : [0]) {
       if (delay) await wait(delay, signal);
       try {
         const res = await fetch(`${API}/models/${encodeURIComponent(m)}:streamGenerateContent?alt=sse`, {
@@ -55,9 +81,30 @@ async function stream(model: string, apiKey: string, body: unknown, signal: Abor
         if (m !== model) onModel?.(m);
         return await read(res, onText);
       } catch (e) {
-        if (!busy(e)) throw e;
+        if (!busy(e) && !(i > 0 && e instanceof GeminiError && e.status === 404)) throw e;
         last = e;
+        console.warn(`Gemini ${m}: ${e instanceof GeminiError ? `${e.status} ${e.message}` : e}`);
       }
+    }
+    if (i === 0) chain = await fallbackChain(apiKey, model);
+  }
+  // Son çare: akışsız uç nokta (akışlı uç nokta tek başına yoğun olabiliyor).
+  for (const m of chain.slice(0, 2)) {
+    try {
+      const res = await fetch(`${API}/models/${encodeURIComponent(m)}:generateContent`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
+        body: JSON.stringify(body),
+        signal,
+      });
+      if (!res.ok) await fail(res);
+      const j = await res.text();
+      if (m !== model) onModel?.(m);
+      // Tek parça cevap, akıştaki biçimle aynı: "data:" satırı gibi okunur.
+      return await read(new Response(`data: ${j.replace(/\n/g, " ")}\n`), onText);
+    } catch (e) {
+      if (!busy(e)) throw e;
+      last = e;
     }
   }
   throw last;
