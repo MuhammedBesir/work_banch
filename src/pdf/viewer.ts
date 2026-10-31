@@ -1,4 +1,5 @@
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from "pdfjs-dist";
+import type * as PdfjsNS from "pdfjs-dist";
 import { pdfjs } from "./load";
 import { fold } from "../format";
 import { normalizeRects } from "../geometry";
@@ -37,7 +38,7 @@ interface PageView {
   search: HTMLDivElement;
   renderedScale: number;
   task: RenderTask | null;
-  textLayer: InstanceType<typeof pdfjs.TextLayer> | null;
+  textLayer: InstanceType<typeof PdfjsNS.TextLayer> | null;
 }
 
 const GAP = 24; // space-6: PDF sayfaları arası
@@ -442,7 +443,7 @@ export class Viewer {
     // Metin katmanı: seçim ve arama için, canvas'ın ve vurgu katmanının üstünde, saydam.
     const text = h("div", { class: "textLayer" });
     text.style.setProperty("--scale-factor", String(scale));
-    const tl = new pdfjs.TextLayer({ textContentSource: page.streamTextContent(), container: text, viewport: vp });
+    const tl = new (pdfjs().TextLayer)({ textContentSource: page.streamTextContent(), container: text, viewport: vp });
     p.textLayer = tl;
     try {
       await tl.render();

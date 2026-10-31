@@ -22,11 +22,11 @@ import { AudioBar } from "./audio/bar";
 import { canLiveTranscribe, canRecord, clock, Recorder } from "./audio/recorder";
 import { openTranscript } from "./audio/transcript";
 import { askCover, askFolder, askNotebook, askPin, askTags } from "./ui/organize";
-import { appendPages, createNotebook, type Template } from "./editor/notebook";
+import type { Template } from "./editor/templates";
 import { checkLock, makeLock } from "./app/lock";
 import { rasterInk } from "./write/raster";
 import { unionBox } from "./write/geometry";
-import { looksLikePdf, looksScanned, loadOutline, OpenError, openPdf, pageText, type OutlineItem } from "./pdf/load";
+import { loadPdfjs, looksLikePdf, looksScanned, loadOutline, OpenError, openPdf, pageText, type OutlineItem } from "./pdf/load";
 import { Viewer, type SelectionPart } from "./pdf/viewer";
 import { PageEditor, type EditPage } from "./editor/pageEditor";
 import { chatMarkdown, type AiContext, type Cite, type SavedTurn } from "./ai/prompt";
@@ -518,6 +518,8 @@ async function organize(rec: FileRecord, what: import("./ui/home").Organize): Pr
 async function newNotebook(): Promise<void> {
   const c = await askNotebook();
   if (!c) return;
+  // pdf-lib yalnızca burada yüklenir (açılış paketine girmez).
+  const { createNotebook } = await import("./editor/notebook");
   const bytes = await createNotebook(c.template, c.pages, c.landscape, c.name);
   const name = /\.pdf$/i.test(c.name) ? c.name : `${c.name}.pdf`;
   await openFile(new File([bytes], name, { type: "application/pdf" }), undefined, { notebook: { template: c.template } });
@@ -536,6 +538,7 @@ async function appendNotebookPage(): Promise<void> {
     return;
   }
   const template: Template = r.file.rec.notebook!.template;
+  const { appendPages } = await import("./editor/notebook");
   const bytes = await appendPages(r.file.bytes, template, 1);
   const hash = await sha256(bytes.slice().buffer as ArrayBuffer);
   const old = r.file.rec;
@@ -671,6 +674,9 @@ async function showHome(): Promise<void> {
   app.replaceChildren(home.el);
   document.title = "Çalışma Masası";
   await refreshRecent();
+  // pdf.js açılış ekranı çizildikten sonra boşta yüklenir: ilk dosya beklemeden açılır.
+  const idle = (window as Window & { requestIdleCallback?: (f: () => void) => void }).requestIdleCallback ?? ((f: () => void) => setTimeout(f, 800));
+  idle(() => void loadPdfjs());
 }
 
 async function refreshRecent(): Promise<void> {

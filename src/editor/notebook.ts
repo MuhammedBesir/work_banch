@@ -1,9 +1,8 @@
 import { PDFDocument } from "pdf-lib";
 import { drawDots, drawGrid, drawLined } from "./build";
 
-export type Template = "blank" | "lined" | "grid" | "dots";
-
-export const TEMPLATES: [Template, string][] = [["lined", "Çizgili"], ["grid", "Kareli"], ["dots", "Noktalı"], ["blank", "Boş"]];
+import type { Template } from "./templates";
+export type { Template };
 
 const A4: [number, number] = [595.28, 841.89];
 

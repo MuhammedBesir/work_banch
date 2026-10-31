@@ -1,4 +1,4 @@
-import { TEMPLATES, type Template } from "../editor/notebook";
+import { TEMPLATES, type Template } from "../editor/templates";
 import { h } from "../util";
 import { openDialog } from "./dialog";
 

@@ -1,10 +1,25 @@
-import * as pdfjs from "pdfjs-dist";
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import type * as PdfjsNS from "pdfjs-dist";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+// pdf.js ayrı parça: açılış ekranı onsuz hızlı açılır; ilk dosyada (ya da boşta önceden) yüklenir.
+let lib: typeof PdfjsNS | null = null;
+let loading: Promise<typeof PdfjsNS> | null = null;
 
-export { pdfjs };
+export function loadPdfjs(): Promise<typeof PdfjsNS> {
+  if (lib) return Promise.resolve(lib);
+  loading ??= Promise.all([import("pdfjs-dist"), import("pdfjs-dist/build/pdf.worker.min.mjs?url")]).then(([m, w]) => {
+    m.GlobalWorkerOptions.workerSrc = w.default;
+    lib = m;
+    return m;
+  });
+  return loading;
+}
+
+/** Yüklenmiş pdf.js (bir belge açıldıktan sonra her zaman hazırdır). */
+export function pdfjs(): typeof PdfjsNS {
+  if (!lib) throw new Error("pdf.js henüz yüklenmedi");
+  return lib;
+}
 
 export type PasswordPrompt = (wrong: boolean) => Promise<string | null>;
 
@@ -26,6 +41,7 @@ export function looksLikePdf(bytes: Uint8Array): boolean {
 
 /** PDF'i açar; parola gerekiyorsa sorar. Parola yalnızca bellekte, bu açılış için tutulur. */
 export async function openPdf(data: Uint8Array, askPassword: PasswordPrompt): Promise<PDFDocumentProxy> {
+  const pdfjs = await loadPdfjs();
   const task = pdfjs.getDocument({
     data,
     isEvalSupported: false,

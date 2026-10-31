@@ -65,7 +65,7 @@ export async function notesDocx(o: NotesInput): Promise<Blob> {
 
 /** PDF'in sayfalarını (işaretlerle birlikte, düzleştirilmiş) resim olarak çiz. */
 export async function renderPages(pdf: Uint8Array, maxWidth: number, onProgress?: (done: number, total: number) => void, only?: number[]): Promise<{ png: string; w: number; h: number }[]> {
-  const { pdfjs } = await import("../pdf/load");
+  const pdfjs = await (await import("../pdf/load")).loadPdfjs();
   const doc = await pdfjs.getDocument({ data: pdf }).promise;
   const out: { png: string; w: number; h: number }[] = [];
   const list = only ?? [...Array(doc.numPages).keys()];
