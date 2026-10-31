@@ -15,7 +15,10 @@ import { createBackup, parseBackup, restoreBackup } from "./backup";
 import { dateLong, num, percent, relative } from "./format";
 import { readingOrder } from "./geometry";
 import { editMark, editRect } from "./editor/transform";
-import { recognizePage, stopOcr, type OcrPage } from "./ocr/ocr";
+import { recognizeCanvas, recognizePage, stopOcr, type OcrPage } from "./ocr/ocr";
+import { openHandwriting } from "./ui/handwriting";
+import { rasterInk } from "./write/raster";
+import { unionBox } from "./write/geometry";
 import { looksLikePdf, looksScanned, loadOutline, OpenError, openPdf, pageText, type OutlineItem } from "./pdf/load";
 import { Viewer, type SelectionPart } from "./pdf/viewer";
 import { PageEditor, type EditPage } from "./editor/pageEditor";
@@ -113,6 +116,9 @@ let marksByPage = new Map<number, Mark[]>();
 /** Taranmış sayfaların OCR sonucu (meta `ocr:<hash>`), sayfa → metin ve kelime kutuları. */
 let ocrPages = new Map<number, OcrPage>();
 let ocrRun: { stop: boolean } | null = null;
+/** Tanınmış el yazısı (meta `hw:<hash>`): sayfa → kelimeler ve hangi çizimlerden tanındığı. */
+let hwPages = new Map<number, OcrPage & { sig: string }>();
+let hwRun: { stop: boolean } | null = null;
 let rightTab: "marks" | "ai" = "marks";
 /** Son metin seçimi: AI'nın "Seçim" kapsamı için (Sor düğmesine basınca seçim kaybolsa da kalır). */
 let lastSelection: SelectionPart[] | null = null;
@@ -566,6 +572,8 @@ async function openReader(file: OpenDoc): Promise<void> {
   cards = await db.cardsFor(file.rec.hash);
   const savedOcr = (await db.getMeta<Record<string, OcrPage>>(`ocr:${file.rec.hash}`)) ?? {};
   ocrPages = new Map(Object.entries(savedOcr).map(([k, v]) => [Number(k), v]));
+  const savedHw = (await db.getMeta<Record<string, OcrPage & { sig: string }>>(`hw:${file.rec.hash}`)) ?? {};
+  hwPages = new Map(Object.entries(savedHw).map(([k, v]) => [Number(k), v]));
   indexHighlights();
   indexMarks();
   rightTab = "marks";
@@ -587,6 +595,7 @@ async function openReader(file: OpenDoc): Promise<void> {
     ] : []),
     { label: "Bu sayfaya not ekle", shortcut: "Shift N", run: () => addPageNote() },
     { label: "Metni tanıt (OCR): bu sayfa", run: () => void runOcr("page") },
+    { label: "El yazısını tanı (aranabilir yap)", run: () => void runHandwriting(false) },
     { label: "Metni tanıt (OCR): tüm sayfalar", run: () => void runOcr("all") },
     "sep",
     { label: "Başka dosya aç", shortcut: "Ctrl O", run: () => void pickFile() },
@@ -758,6 +767,7 @@ async function openReader(file: OpenDoc): Promise<void> {
     remove: removeMark,
     redraw: drawMarks,
     pen: (pen) => void changeSettings({ ...settings, pen }),
+    handwriting: (list, page, mode) => handwritingDialog(list, page, mode),
     announce,
   });
   write.el.hidden = true;
@@ -809,12 +819,14 @@ async function openReader(file: OpenDoc): Promise<void> {
   bindFocusPeek(root);
 
   viewer.ocrFor = (p) => ocrPages.get(p) ?? null;
+  viewer.hwFor = (p) => hwPages.get(p) ?? null;
   await viewer.init((p) => byPage.get(p) ?? [], file.rec.lastPage);
   if (file.rec.scrollMode && file.rec.scrollMode !== viewer.scrollMode) viewer.setScrollMode(file.rec.scrollMode);
   updateZoomLabel();
   onPageChange(viewer.current);
   refreshHighlights();
   refreshMarks();
+  applyHandwriting();
   rail.setBookmarks(file.rec.bookmarks);
   stage.focus({ preventScroll: true });
   if (file.rec.lastPage > 0) toast(`Kaldığın yerden: sayfa ${num(file.rec.lastPage + 1)}`);
@@ -860,7 +872,9 @@ function setScrollMode(mode: "continuous" | "paged"): void {
 async function textOf(i: number): Promise<string> {
   if (!reader) return "";
   const own = await pageText(reader.file.doc, i);
-  return own.trim() ? own : ocrPages.get(i)?.text ?? "";
+  const hw = hwPages.get(i)?.text;
+  const base = own.trim() ? own : ocrPages.get(i)?.text ?? "";
+  return hw ? `${base}\n${hw}` : base;
 }
 
 /**
@@ -933,6 +947,114 @@ async function runOcr(scope: "page" | "all"): Promise<void> {
   if (done) {
     r.file.rec.scannedDismissed = true;
     void db.putFile(r.file.rec);
+  }
+}
+
+// ---------- El yazısı ----------
+
+/** Sayfanın ölçek 1'deki boyutu (çizimler bu oranda çizilir). */
+function pageSize(page: number): [number, number] {
+  const el = reader?.viewer.pageElement(page);
+  const s = reader?.viewer.scale ?? 1;
+  return el ? [el.clientWidth / s, el.clientHeight / s] : [595, 842];
+}
+
+const inkOf = (page: number) => (marksByPage.get(page) ?? []).filter((m) => m.kind === "ink" || m.kind === "shape");
+const inkSig = (list: Mark[]) => `${list.length}:${Math.max(0, ...list.map((m) => m.updatedAt))}`;
+
+/** Kement eylem çubuğundan: seçili el yazısını metne çevir ya da matematiği çöz. */
+function handwritingDialog(list: Mark[], page: number, mode: "text" | "math"): void {
+  if (!reader) return;
+  const r = reader;
+  const box = unionBox(list)!;
+  const [pw, ph] = pageSize(page);
+  const color = (list.find((m) => m.kind === "ink") as Extract<Mark, { kind: "ink" }> | undefined)?.color ?? "black";
+  openHandwriting({
+    mode,
+    canvas: rasterInk(list, pw, ph, box),
+    ai: settings.ai,
+    ocr: async (canvas, onProgress) => (await recognizeCanvas(canvas, (st, ratio) => onProgress(st.startsWith("loading") ? `Tanıma verisi yükleniyor… %${Math.round(ratio * 100)}` : `Okunuyor… %${Math.round(ratio * 100)}`))).text,
+    insertText: (text, remove) => {
+      const now = Date.now();
+      const m: Mark = { id: uid(), fileHash: r.file.rec.hash, page, kind: "text", color, box: [box[0], box[1], Math.min(1 - box[0], Math.max(box[2], 0.25)), box[3]], text, createdAt: now, updatedAt: now };
+      if (r.mode === "write") r.write.replace([m], remove ? list : []);
+      else addMark(m);
+      announce("Metin kutusu eklendi");
+    },
+    insertNote: (text) => {
+      const now = Date.now();
+      const x = Math.min(0.72, box[0] + box[2] + 0.02);
+      const m: Mark = { id: uid(), fileHash: r.file.rec.hash, page, kind: "sticky", ai: true, box: [x, box[1], 0.27, 0.12], text, createdAt: now, updatedAt: now };
+      if (r.mode === "write") r.write.replace([m], []);
+      else addMark(m);
+      announce("Çözüm not olarak eklendi");
+    },
+    openAiSettings: aiSetup,
+    copy: (t) => void navigator.clipboard?.writeText(t).then(() => toast("Kopyalandı"), () => toast("Panoya kopyalanamadı.")),
+  });
+}
+
+function applyHandwriting(): void {
+  if (!reader) return;
+  reader.panel.setHandwriting(new Map([...hwPages].map(([p, v]) => [p, v.text])));
+}
+
+/**
+ * El yazısını tanı (bu cihazda): kalem çizgisi olan sayfalar tanınır, sonuç sayfanın metin katmanına
+ * eklenir; Ctrl F, panel araması ve AI kapsamı el yazısını da görür. `quiet`: Yaz modundan çıkınca
+ * yalnızca değişen sayfalar, şeritsiz.
+ */
+async function runHandwriting(quiet: boolean): Promise<void> {
+  if (!reader || hwRun) return;
+  const r = reader;
+  const pages = [...marksByPage.keys()].filter((p) => inkOf(p).some((m) => m.kind === "ink") && hwPages.get(p)?.sig !== inkSig(inkOf(p))).sort((a, b) => a - b);
+  // Çizimi silinen sayfaların eski sonucu da kalkar.
+  for (const p of [...hwPages.keys()]) if (!inkOf(p).some((m) => m.kind === "ink")) hwPages.delete(p);
+  if (!pages.length) {
+    if (!quiet) toast(hwPages.size ? "El yazısı güncel; aranabilir." : "Tanınacak el yazısı yok. Önce Yaz modunda kalemle yaz.");
+    applyHandwriting();
+    return;
+  }
+  const run = { stop: false };
+  hwRun = run;
+  const title = h("p", { class: "cm-notice__title", text: "El yazısı tanınıyor…" });
+  if (!quiet) {
+    r.band.replaceChildren(
+      h("div", { class: "cm-notice", role: "status" },
+        h("span", { class: "cm-notice__sym", "aria-hidden": "true", text: "…" }),
+        h("div", {}, title,
+          h("p", { class: "cm-notice__text", text: "Bu cihazda tanınır, hiçbir yere gönderilmez. Düzgün, ayrık yazıda iyi sonuç verir." }),
+          h("div", { style: "display:flex;gap:8px" }, h("button", { class: "cm-btn cm-btn--sm", onclick: () => { run.stop = true; } }, "Durdur")),
+        ),
+      ),
+    );
+  }
+  let done = 0;
+  try {
+    for (const p of pages) {
+      if (run.stop || reader !== r) break;
+      title.textContent = `El yazısı tanınıyor: sayfa ${num(p + 1)} (${num(done + 1)}/${num(pages.length)})`;
+      const list = inkOf(p);
+      const [pw, ph] = pageSize(p);
+      const res = await recognizeCanvas(rasterInk(list, pw, ph, null, 2200));
+      if (reader !== r) break;
+      if (res.text.trim()) hwPages.set(p, { ...res, sig: inkSig(list) });
+      else hwPages.delete(p);
+      r.viewer.refreshText(p);
+      done++;
+    }
+  } catch (err) {
+    console.error(err);
+    if (!quiet) toast("El yazısı tanınamadı. Sayfayı yenileyip tekrar dene.");
+  }
+  hwRun = null;
+  if (reader !== r) return;
+  await db.putMeta(`hw:${r.file.rec.hash}`, Object.fromEntries(hwPages));
+  r.search.invalidate();
+  applyHandwriting();
+  if (!quiet) {
+    r.band.replaceChildren();
+    toast(`${num(done)} sayfanın el yazısı tanındı. Artık Ctrl F ile aranabilir.`);
   }
 }
 
@@ -1053,6 +1175,8 @@ async function setMode(mode: Mode): Promise<void> {
     r.write.disable();
     r.write.el.hidden = true;
     r.root.classList.remove("is-write");
+    // El yazısı bir kez aranabilir yapıldıysa değişen sayfalar arka planda yeniden tanınır.
+    if (hwPages.size) void runHandwriting(true);
   }
   r.mode = mode;
   renderModeSeg(mode);

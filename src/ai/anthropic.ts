@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { SYSTEM, userMessage, type AskBase, type AskResult } from "./prompt";
+import { SYSTEM, promptText, type AskBase, type AskResult } from "./prompt";
 
 // Kullanıcının kendi Anthropic anahtarıyla, tarayıcıdan doğrudan api.anthropic.com'a. Arada sunucu yok.
 
@@ -15,7 +15,12 @@ export async function ask(o: AskBase, apiKey: string, model: string): Promise<As
     messages.push({ role: "user", content: t.question });
     messages.push({ role: "assistant", content: t.answer });
   }
-  messages.push({ role: "user", content: userMessage(o.ctx, o.question) });
+  messages.push({
+    role: "user",
+    content: o.image
+      ? [{ type: "image", source: { type: "base64", media_type: o.image.mediaType, data: o.image.base64 } }, { type: "text", text: promptText(o) }]
+      : promptText(o),
+  });
 
   const fallback = FALLBACK_MODELS.has(model);
   const stream = client.beta.messages.stream(
@@ -23,7 +28,7 @@ export async function ask(o: AskBase, apiKey: string, model: string): Promise<As
       model,
       max_tokens: 16000,
       output_config: { effort: "medium" },
-      system: SYSTEM,
+      system: o.system ?? SYSTEM,
       messages,
       ...(fallback ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
     },

@@ -54,6 +54,15 @@ export async function recognizePage(doc: PDFDocumentProxy, index: number, onProg
   canvas.width = Math.floor(vp.width);
   canvas.height = Math.floor(vp.height);
   await page.render({ canvasContext: canvas.getContext("2d", { willReadFrequently: true })!, viewport: vp }).promise;
+  return recognizeWith(w, canvas);
+}
+
+/** Herhangi bir tuvali tanı (el yazısı): kelime kutuları tuvale göre 0–1. */
+export async function recognizeCanvas(canvas: HTMLCanvasElement, onProgress?: (status: string, ratio: number) => void): Promise<OcrPage> {
+  return recognizeWith(await getWorker(onProgress), canvas, 10);
+}
+
+async function recognizeWith(w: TWorker, canvas: HTMLCanvasElement, minConfidence = 20): Promise<OcrPage> {
   const { data } = await w.recognize(canvas, {}, { blocks: true, text: true });
   const W = canvas.width;
   const H = canvas.height;
@@ -62,7 +71,7 @@ export async function recognizePage(doc: PDFDocumentProxy, index: number, onProg
     for (const para of block.paragraphs) {
       for (const line of para.lines) {
         const words = line.words
-          .filter((wd) => wd.text.trim() && wd.confidence > 20)
+          .filter((wd) => wd.text.trim() && wd.confidence > minConfidence)
           .map((wd) => ({ t: wd.text.trim(), b: [wd.bbox.x0 / W, wd.bbox.y0 / H, wd.bbox.x1 / W, wd.bbox.y1 / H] as OcrWord["b"] }));
         if (words.length) lines.push(words);
       }
@@ -81,7 +90,7 @@ export async function stopOcr(): Promise<void> {
  * OCR metin katmanı: pdf.js metin katmanıyla aynı yapı (saydam yazı, mutlak konum, satır sonunda <br>),
  * böylece seçim, vurgu, arama ve AI kapsamı taranmış sayfada da çalışır.
  */
-export function buildOcrLayer(container: HTMLElement, ocr: OcrPage, width: number, height: number): void {
+export function buildOcrLayer(container: HTMLElement, ocr: OcrPage, width: number, height: number, append = false): void {
   const ctx = document.createElement("canvas").getContext("2d")!;
   const frag = document.createDocumentFragment();
   for (const line of ocr.lines) {
@@ -96,10 +105,18 @@ export function buildOcrLayer(container: HTMLElement, ocr: OcrPage, width: numbe
       const measured = ctx.measureText(text).width || 1;
       const span = document.createElement("span");
       span.textContent = text;
+      if (append) span.className = "is-hw";
       span.style.cssText = `left:${x0 * width}px;top:${y0 * height}px;font-size:${fs}px;font-family:sans-serif;transform:scaleX(${((right - x0) * width) / measured})`;
       frag.append(span);
     });
     frag.append(document.createElement("br"));
+  }
+  if (append) {
+    // El yazısı: PDF'in kendi metin katmanına eklenir (arama ve seçim ikisini birden görür).
+    const end = container.querySelector(":scope > .endOfContent");
+    if (end) end.before(frag);
+    else container.append(frag);
+    return;
   }
   // pdf.js'in seçim düzeltmesi bu öğeyi kullanır: boşluğa sürüklenince seçim belgenin sonuna atlamaz.
   frag.append(Object.assign(document.createElement("div"), { className: "endOfContent" }));

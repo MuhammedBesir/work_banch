@@ -1,5 +1,5 @@
 import type { MLCEngineInterface } from "@mlc-ai/web-llm";
-import { SYSTEM, userMessage, type AskBase, type AskResult } from "./prompt";
+import { SYSTEM, promptText, type AskBase, type AskResult } from "./prompt";
 
 // Cihazda model (WebLLM + WebGPU): metin tarayıcıdan hiç çıkmaz. Model bir kez indirilir ve
 // tarayıcının önbelleğinde kalır. Kısa açıklama ve basitleştirmede iyi, uzun özette zayıf.
@@ -52,9 +52,9 @@ export async function ask(o: AskBase, model: string): Promise<AskResult> {
   const onAbort = () => e.interruptGenerate();
   o.signal.addEventListener("abort", onAbort);
   try {
-    const messages: { role: "system" | "user" | "assistant"; content: string }[] = [{ role: "system", content: SYSTEM }];
+    const messages: { role: "system" | "user" | "assistant"; content: string }[] = [{ role: "system", content: o.system ?? SYSTEM }];
     for (const t of o.history.slice(-2)) messages.push({ role: "user", content: t.question }, { role: "assistant", content: t.answer });
-    messages.push({ role: "user", content: userMessage(o.ctx, o.question) });
+    messages.push({ role: "user", content: promptText(o) });
     const stream = await e.chat.completions.create({ messages, stream: true, stream_options: { include_usage: true } });
     let text = "";
     let stop: string | null = null;

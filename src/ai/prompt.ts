@@ -95,7 +95,15 @@ export interface AskBase {
   onText(delta: string): void;
   /** Cihazdaki model ilk kullanımda indirilip hazırlanırken: 0–1 arası ilerleme. */
   onProgress?(ratio: number, text: string): void;
+  /** Belgeye dayanmayan iş (el yazısı, matematik, yazıya dökme özeti): kendi sistem istemi, soru olduğu gibi gider. */
+  system?: string;
+  raw?: boolean;
+  /** Görsel (el yazısı): yalnızca görsel destekleyen sağlayıcılarda (Claude, OpenAI). */
+  image?: { base64: string; mediaType: "image/png" | "image/jpeg" };
 }
+
+/** Sağlayıcıya giden kullanıcı metni. */
+export const promptText = (o: AskBase): string => (o.raw ? o.question.trim() : userMessage(o.ctx, o.question));
 
 export interface Usage {
   input: number;

@@ -61,6 +61,8 @@ export class Viewer {
   private highlightsFor: (page: number) => Highlight[] = () => [];
   /** Metni olmayan (taranmış) sayfa için OCR sonucu; varsa metin katmanı ondan kurulur. */
   ocrFor: (page: number) => OcrPage | null = () => null;
+  /** Tanınmış el yazısı: metin katmanına eklenir, aranabilir. */
+  hwFor: (page: number) => OcrPage | null = () => null;
 
   constructor(
     readonly stage: HTMLElement,
@@ -436,6 +438,8 @@ export class Viewer {
       const ocr = this.ocrFor(p.index);
       if (ocr) buildOcrLayer(text, ocr, vp.width, vp.height);
     }
+    const hw = this.hwFor(p.index);
+    if (hw) buildOcrLayer(text, hw, vp.width, vp.height, true);
     p.text?.remove();
     p.el.append(text);
     p.text = text;
@@ -443,12 +447,12 @@ export class Viewer {
     this.textReady.delete(p.index);
   }
 
-  /** OCR sonucu geldikten sonra çizili sayfanın metin katmanını yenile. */
+  /** OCR ya da el yazısı sonucu geldikten sonra çizili sayfanın metin katmanını yeniden kur. */
   refreshText(i: number): void {
     const p = this.pages[i];
-    if (!p?.text || p.text.textContent?.trim() && !p.text.classList.contains("is-ocr")) return;
-    const ocr = this.ocrFor(i);
-    if (ocr) buildOcrLayer(p.text, ocr, p.w * p.renderedScale, p.h * p.renderedScale);
+    if (!p?.text) return;
+    p.renderedScale = 0;
+    this.scheduleRender(0);
   }
 
   private textReady = new Map<number, (() => void)[]>();

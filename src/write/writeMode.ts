@@ -904,6 +904,16 @@ export class WriteMode {
     el.addEventListener("keydown", onKey);
   }
 
+  /** Dışarıdan (el yazısı → metin) ekle ve sil; tek adımda geri alınır. */
+  replace(add: Mark[], remove: Mark[]): void {
+    remove.forEach((m) => this.actions.remove(m.id));
+    add.forEach((m) => this.actions.add(m));
+    this.selected.clear();
+    add.forEach((m) => this.selected.add(m.id));
+    this.record([...remove.map((m) => ({ remove: m })), ...add.map((m) => ({ add: m }))]);
+    if (add[0]) this.actions.redraw(add[0].page);
+  }
+
   finishEditing(): void {
     if (!this.editingId) return;
     (document.activeElement as HTMLElement | null)?.blur?.();

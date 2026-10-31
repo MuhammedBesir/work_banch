@@ -38,3 +38,20 @@ export function ready(ai: AiSettings): boolean {
   if (ai.mode === "openai") return !!ai.keys.openai;
   return ai.mode !== "off";
 }
+
+/** Görsel (el yazısı) gönderebilen sağlayıcı: Claude ve OpenAI. */
+export function visionReady(ai: AiSettings): boolean {
+  return (ai.mode === "anthropic" || ai.mode === "openai") && ready(ai);
+}
+
+/** Belgeye bağlı olmayan tek seferlik istek (el yazısı, matematik, özet, çeviri). */
+export async function askSimple(
+  ai: AiSettings,
+  o: { system: string; text: string; image?: AskBase["image"]; signal: AbortSignal; onText?(delta: string): void; onProgress?: AskBase["onProgress"] },
+): Promise<string> {
+  const r = await ask(ai, {
+    history: [], ctx: { label: "", pages: [] }, question: o.text, signal: o.signal, raw: true, system: o.system,
+    image: o.image, onText: o.onText ?? (() => {}), onProgress: o.onProgress,
+  });
+  return r.text.trim();
+}

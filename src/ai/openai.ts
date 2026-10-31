@@ -1,15 +1,20 @@
 import OpenAI from "openai";
-import { SYSTEM, userMessage, type AskBase, type AskResult } from "./prompt";
+import { SYSTEM, promptText, type AskBase, type AskResult } from "./prompt";
 
 // OpenAI (kendi anahtarınla) ve OpenAI uyumlu yerel sunucular (Ollama, LM Studio): tarayıcıdan doğrudan.
 
 export async function ask(o: AskBase, opts: { apiKey: string; model: string; baseURL?: string }): Promise<AskResult> {
   const client = new OpenAI({ apiKey: opts.apiKey || "yerel", baseURL: opts.baseURL, dangerouslyAllowBrowser: true, maxRetries: 1 });
-  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [{ role: "system", content: SYSTEM }];
+  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [{ role: "system", content: o.system ?? SYSTEM }];
   for (const t of o.history.slice(-4)) {
     messages.push({ role: "user", content: t.question }, { role: "assistant", content: t.answer });
   }
-  messages.push({ role: "user", content: userMessage(o.ctx, o.question) });
+  messages.push({
+    role: "user",
+    content: o.image
+      ? [{ type: "image_url", image_url: { url: `data:${o.image.mediaType};base64,${o.image.base64}` } }, { type: "text", text: promptText(o) }]
+      : promptText(o),
+  });
   const stream = await client.chat.completions.create(
     { model: opts.model, messages, stream: true, stream_options: { include_usage: true } },
     { signal: o.signal },
