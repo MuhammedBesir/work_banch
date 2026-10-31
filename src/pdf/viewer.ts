@@ -176,7 +176,8 @@ export class Viewer {
 
   private fitScale(): void {
     if (this.zoomMode === "custom") return;
-    const availW = Math.max(200, this.stage.clientWidth - PAD_X * 2 - this.reserveLeft);
+    // Palet için ayrılan boşluk iki yandan eşit: sayfa ortada kalır.
+    const availW = Math.max(200, this.stage.clientWidth - PAD_X * 2 - this.reserveLeft * 2);
     const availH = Math.max(200, this.stage.clientHeight - GAP * 2);
     const ref = this.pages[this.current] ?? this.pages[0];
     const byWidth = availW / this.maxWidth();
@@ -195,8 +196,8 @@ export class Viewer {
       this.tops.push(y);
       y += hgt + GAP;
     }
-    this.root.style.minWidth = `${Math.round(this.maxWidth() * this.scale) + PAD_X * 2 + this.reserveLeft}px`;
-    this.root.style.paddingLeft = this.reserveLeft ? `${PAD_X + this.reserveLeft}px` : "";
+    this.root.style.minWidth = `${Math.round(this.maxWidth() * this.scale) + PAD_X * 2 + this.reserveLeft * 2}px`;
+    this.root.style.paddingLeft = this.root.style.paddingRight = this.reserveLeft ? `${PAD_X + this.reserveLeft}px` : "";
     this.root.style.setProperty("--z", String(this.scale)); // Yaz modu katmanı zoom ile ölçeklenir
     this.root.classList.toggle("is-paged", this.scrollMode === "paged");
     for (const p of this.pages) this.drawHighlights(p.index);

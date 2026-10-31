@@ -3,16 +3,23 @@ import { contextChars, estimateCost, formatCost, plainText, segment, type AiCont
 import { num } from "../format";
 import type { AiSettings, Color } from "../types";
 import { AI_PROVIDERS, aiModelLabel, COLORS } from "../types";
+import { icon } from "./icons";
 import { h, kbd, marker } from "../util";
 import { openMenu } from "./menu";
 import { toast } from "./toast";
 
-export type Scope = "selection" | "page" | "section" | "highlights" | "hl2" | "hl4" | "hl24";
+export type Scope = "selection" | "area" | "page" | "section" | "highlights" | "hl2" | "hl4" | "hl24";
 
 export interface AiActions {
+  /** Sayfada fareyle / parmakla bir alan seçtir (şekil, formül, tablo dahil). */
+  pickArea(): void;
+  /** Görüntü gönderebilen sağlayıcı mı (Claude, OpenAI, Gemini). */
+  vision(): boolean;
+  /** AI penceresini tam ekran yap / eski haline getir. */
+  fullscreen?(on: boolean): void;
   settings(): AiSettings;
   /** Kapsamın metni; olmazsa nedeni. */
-  context(scope: Scope): Promise<AiContext | { error: string }>;
+  context(scope: Scope, withImage: boolean): Promise<AiContext | { error: string }>;
   counts(): { selection: boolean; hl2: number; hl4: number };
   /** Kaynak etiketinin üstüne gelince sayfadaki dayanak metni göster / gizle. */
   citeHover(c: Cite | null): void;
@@ -38,7 +45,7 @@ C: kısa cevap [s. SAYFA: "alıntı"]`;
 /** Cihazdaki küçük modelin bağlam penceresi dar: kapsam bundan uzunsa gönderilmez, söylenir. */
 const DEVICE_MAX_CHARS = 6000;
 
-const SCOPES: [Scope, string][] = [["selection", "Seçim"], ["page", "Bu sayfa"], ["section", "Bölüm"], ["highlights", "Vurgularım"]];
+const SCOPES: [Scope, string][] = [["selection", "Seçim"], ["area", "Alan"], ["page", "Bu sayfa"], ["section", "Bölüm"], ["highlights", "Vurgularım"]];
 
 /**
  * AI paneli: ayrı bir sohbet ekranı değil, İşaretler'in yanında bir sekme.
@@ -46,6 +53,9 @@ const SCOPES: [Scope, string][] = [["selection", "Seçim"], ["page", "Bu sayfa"]
  */
 export class AiPanel {
   readonly el: HTMLElement;
+  private fullBtn: HTMLButtonElement;
+  private full = false;
+  private imageBox: HTMLInputElement;
   private list: HTMLElement;
   private quick: HTMLElement;
   private input: HTMLInputElement;
@@ -69,6 +79,8 @@ export class AiPanel {
     this.quick = h("div", { class: "cm-quick", role: "group", "aria-label": "Hızlı istekler" });
     this.list = h("div", { class: "cm-list cm-ai__list", "aria-live": "polite" });
     this.scopeSeg = h("div", { class: "cm-seg cm-seg--sm", role: "group", "aria-label": "Kapsam" });
+    this.imageBox = h("input", { type: "checkbox", checked: true, "aria-label": "Sayfanın görüntüsünü de gönder" });
+    this.imageBox.addEventListener("change", () => void this.loadPreview());
     this.input = h("input", { class: "cm-input", placeholder: "Bu belgeye sor…", "aria-label": "AI'ya sor" });
     this.input.addEventListener("keydown", (e) => {
       e.stopPropagation();
@@ -83,6 +95,7 @@ export class AiPanel {
     });
     this.preview.addEventListener("keydown", (e) => e.stopPropagation());
     this.sentLine = h("div", { class: "cm-ai__sent" });
+    this.fullBtn = h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--icon", "aria-label": "Tam ekran", title: "Tam ekran (genişletmek için sol kenarı da sürükleyebilirsin)", "aria-pressed": "false", onclick: () => this.setFull(!this.full) }, icon("expand"));
     this.spentEl = h("span", { class: "cm-num cm-muted", title: "Bu oturumdaki tahmini AI harcaması" });
     const head = h("div", { class: "cm-panel__head" },
       h("div", { class: "cm-panel__title" }, h("span", { text: "AI" }), this.mode),
@@ -90,10 +103,15 @@ export class AiPanel {
         h("button", { class: "cm-linkbtn", onclick: () => this.history.length ? this.actions.exportChat(this.history) : toast("Dışa aktaracak sohbet yok.") }, "Sohbeti dışa aktar"),
         h("button", { class: "cm-linkbtn", onclick: () => this.clear() }, "Temizle"),
         this.spentEl,
+        this.fullBtn,
       ),
     );
     const send = h("div", { class: "cm-ai__send" },
-      h("div", { class: "cm-field", style: "justify-content:space-between;flex-wrap:wrap;gap:6px" }, h("span", { class: "cm-muted", style: "font-size:12px", text: "Kapsam" }), this.scopeSeg),
+      h("div", { class: "cm-field", style: "justify-content:space-between;flex-wrap:wrap;gap:6px" },
+        h("span", { class: "cm-muted", style: "font-size:12px", text: "Kapsam" }),
+        h("div", { style: "display:flex;gap:6px;align-items:center;flex-wrap:wrap" },
+          this.scopeSeg,
+          h("button", { class: "cm-btn cm-btn--sm cm-btn--withicon", title: "Sayfada bir alanı fareyle ya da parmakla çerçevele; şekil, formül ve tablolar da görüntü olarak gider (Shift A)", onclick: () => this.actions.pickArea() }, icon("area"), "Alan seç"))),
       h("div", { style: "display:flex;gap:6px" }, this.input, this.sendBtn),
       this.sentLine,
       this.preview,
@@ -166,6 +184,12 @@ export class AiPanel {
     this.list.append(warn);
   }
 
+  /** Alan seçildi: kapsam Alan olur, imleç girişte. */
+  areaPicked(): void {
+    this.setScope("area");
+    this.input.focus();
+  }
+
   /** Seçim araç çubuğundaki Sor (A): seçim kapsam olarak girişe yerleşir, imleç girişte. */
   askAboutSelection(): void {
     this.setScope("selection");
@@ -194,6 +218,20 @@ export class AiPanel {
   private renderScope(): void {
     this.scopeSeg.replaceChildren(...SCOPES.map(([s, label]) =>
       h("button", { class: this.scope === s ? "is-on" : "", "aria-pressed": String(this.scope === s), onclick: () => this.setScope(s) }, label)));
+  }
+
+  /** Tam ekran: AI sütunu belge alanının yerini alır; Esc ya da aynı düğme geri getirir. */
+  setFull(on: boolean): void {
+    this.full = on;
+    this.fullBtn.replaceChildren(icon(on ? "collapse" : "expand"));
+    this.fullBtn.setAttribute("aria-label", on ? "Tam ekrandan çık" : "Tam ekran");
+    this.fullBtn.title = on ? "Tam ekrandan çık (Esc)" : "Tam ekran";
+    this.fullBtn.setAttribute("aria-pressed", String(on));
+    this.actions.fullscreen?.(on);
+  }
+
+  get isFull(): boolean {
+    return this.full;
   }
 
   private renderQuick(): void {
@@ -227,7 +265,7 @@ export class AiPanel {
   private async loadPreview(): Promise<void> {
     const run = ++this.previewRun;
     this.sentLine.textContent = "Gönderilecek metin hazırlanıyor…";
-    const ctx = await this.actions.context(this.scope);
+    const ctx = await this.actions.context(this.scope, this.imageBox.checked);
     if (run !== this.previewRun) return;
     if ("error" in ctx) {
       this.ctx = null;
@@ -251,9 +289,14 @@ export class AiPanel {
     } }, this.preview.hidden ? "Göster" : "Gizle");
     this.sentLine.replaceChildren(
       "Gönderilecek: ",
-      h("b", { text: `${this.ctx.label}${this.edited ? " (kırpıldı)" : ""} · ${num(chars)} karakter` }),
+      h("b", { text: `${this.ctx.label}${this.edited ? " (kırpıldı)" : ""} · ${num(chars)} karakter${this.ctx.image ? " + görüntü" : ""}` }),
       " ",
       toggle,
+      // Sayfa ve bölümde: şekil, formül ve tablolar için sayfanın görüntüsü de gidebilir.
+      ...(this.actions.vision() && (this.scope === "page" || this.scope === "area")
+        ? [h("label", { class: "cm-ai__imgopt", title: "Metin katmanında olmayan şekil, formül ve tabloları AI da görsün" }, this.imageBox, " Görüntüsünü de gönder")]
+        : []),
+      ...(this.ctx.image ? [h("img", { class: "cm-ai__thumb", src: this.ctx.image.thumb, alt: "Gönderilecek görüntü" })] : []),
     );
   }
 
@@ -262,7 +305,7 @@ export class AiPanel {
     if (!this.ctx) return null;
     if (!this.edited) return this.ctx;
     const page = this.ctx.pages[0]?.page ?? 0;
-    return { label: `${this.ctx.label} (kırpıldı)`, pages: [{ page, text: this.preview.value }] };
+    return { label: `${this.ctx.label} (kırpıldı)`, pages: [{ page, text: this.preview.value }], image: this.ctx.image };
   }
 
   private submit(): void {
@@ -291,7 +334,7 @@ export class AiPanel {
     if (useCurrent || scope === this.scope) {
       ctx = this.outgoing();
     } else {
-      const c = await this.actions.context(scope);
+      const c = await this.actions.context(scope, this.imageBox.checked);
       if ("error" in c) {
         toast(c.error);
         return;
@@ -310,7 +353,8 @@ export class AiPanel {
 
     const turn = h("div", { class: "cm-ai__turn" },
       h("div", { style: "display:flex;flex-direction:column" },
-        h("div", { class: "cm-ai__ctx", style: "align-self:flex-end", text: `${ctx.label} · ${num(contextChars(ctx))} karakter gönderildi` }),
+        h("div", { class: "cm-ai__ctx", style: "align-self:flex-end", text: `${ctx.label} · ${num(contextChars(ctx))} karakter${ctx.image ? " + görüntü" : ""} gönderildi` }),
+        ctx.image ? h("img", { class: "cm-ai__thumb", src: ctx.image.thumb, alt: "Gönderilen görüntü", style: "align-self:flex-end" }) : null,
         h("div", { class: "cm-ai__q", text: question }),
       ),
     );
@@ -330,6 +374,7 @@ export class AiPanel {
         history: this.history,
         ctx,
         question,
+        image: ctx.image ? { base64: ctx.image.base64, mediaType: ctx.image.mediaType } : undefined,
         signal: this.abort.signal,
         onText: (d) => {
           text += d;

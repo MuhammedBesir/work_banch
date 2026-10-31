@@ -1,6 +1,6 @@
 import type { Viewer } from "../pdf/viewer";
-import type { InkColor, Mark, PenKind, ShapeKind } from "../types";
-import { PEN_COLORS, PEN_KINDS } from "../types";
+import type { InkColor, Mark, PenKind, ShapeKind, StickyTint } from "../types";
+import { PEN_COLORS, PEN_KINDS, STICKY_TINTS } from "../types";
 import { h, isTyping, uid } from "../util";
 import { SWATCHES, inkCss, isCustom } from "./colors";
 import {
@@ -30,6 +30,7 @@ type EraserMode = "partial" | "stroke";
 /** Kalem bu kadar süre yerinde durursa çizilen şekil düzeltilir (çiz ve bekle). */
 const HOLD_MS = 550;
 const ERASER_PX = 10;
+const TINT_LABEL: Record<StickyTint, string> = { yellow: "sarı", pink: "pembe", blue: "mavi", green: "yeşil", purple: "mor", gray: "gri" };
 
 type Op = { add: Mark } | { remove: Mark } | { before: Mark; after: Mark };
 
@@ -306,6 +307,18 @@ export class WriteMode {
     this.paintSelection();
   }
 
+  private setTint(t: StickyTint): void {
+    const ops: Op[] = [];
+    for (const id of this.selected) {
+      const m = this.find(id);
+      if (m?.kind !== "sticky") continue;
+      const after: Mark = { ...m, tint: t, updatedAt: Date.now() };
+      this.actions.update(after);
+      ops.push({ before: m, after });
+    }
+    this.record(ops);
+  }
+
   private recolorSelected(c: InkColor): void {
     const ops: Op[] = [];
     for (const id of this.selected) {
@@ -365,19 +378,37 @@ export class WriteMode {
       case "sticky": return this.createText(at, "sticky");
       case "select": return this.pick(e, at);
       case "lasso": return this.lasso(e, at);
-      case "image": return this.chooseImage(at);
+      case "image": return this.hitAt(at)?.kind === "image" ? this.pick(e, at) : this.chooseImage(at);
     }
   };
 
   private onDblClick = (e: MouseEvent) => {
     if (!this.active || this.tool === "highlight") return;
     const el = (e.target as HTMLElement).closest<HTMLElement>(".cm-textbox, .cm-sticky");
-    if (el?.dataset.id) this.edit(el.dataset.id);
+    if (el?.dataset.id) return this.edit(el.dataset.id);
+    // Seçim kutusunun altındaki tek metin kutusu ya da not.
+    const sel = (e.target as HTMLElement).closest(".cm-selbox") && this.selectedOn();
+    if (sel && sel.marks.length === 1 && (sel.marks[0].kind === "text" || sel.marks[0].kind === "sticky")) this.edit(sel.marks[0].id);
   };
+
+  /** Bir işaretin üstünde kıpırdamadan ~0,45 sn basılı tutunca Seç aracına geç ve onu seç. */
+  private holdPick(at: NonNullable<ReturnType<WriteMode["pageAt"]>>, moved: () => boolean, onPick: () => void): () => void {
+    const under = this.hitAt(at);
+    if (!under) return () => {};
+    const t = window.setTimeout(() => {
+      if (moved()) return;
+      onPick();
+      this.setTool("select");
+      this.select(under.id);
+      navigator.vibrate?.(15);
+      this.actions.announce("Seçildi; sürükleyerek taşı");
+    }, 450);
+    return () => clearTimeout(t);
+  }
 
   /** Sayfadaki noktaya en üstteki işaret. */
   private hitAt(at: NonNullable<ReturnType<WriteMode["pageAt"]>>): Mark | undefined {
-    return [...this.actions.marks()].reverse().find((m) => m.page === at.page && hitMark(m, at.x, at.y, at.w, at.h, 14));
+    return [...this.actions.marks()].reverse().find((m) => m.page === at.page && hitMark(m, at.x, at.y, at.w, at.h, 14, true));
   }
 
   /**
@@ -534,12 +565,19 @@ export class WriteMode {
   private drawShape(e: PointerEvent, at: NonNullable<ReturnType<WriteMode["pageAt"]>>): void {
     const live = this.live(at.el);
     const path = document.createElementNS(SVG, "path");
-    path.setAttribute("class", `cm-stroke cm-stroke--${this.color}`);
-    path.setAttribute("style", `stroke-width:calc(${this.width}px * var(--z, 1))`);
+    path.setAttribute("class", `cm-stroke cm-stroke--${colorClass(this.color)}`);
+    path.setAttribute("style", `stroke-width:calc(${this.width}px * var(--z, 1));--c:${inkCss(this.color)}`);
     live.svg.append(path);
     let from: [number, number] | null = null;
     let to: [number, number] = [0, 0];
+    // Var olan bir şeklin üstünde basılı tutmak: yenisini çizme, onu seç.
+    let picked = false;
+    const cancelPick = this.holdPick(at, () => !!from && Math.hypot((to[0] - from[0]) * at.w, (to[1] - from[1]) * at.h) > 4, () => {
+      picked = true;
+      live.done();
+    });
     this.track(e, at.el, (list, ev) => {
+      if (picked) return;
       const [px, py] = list[list.length - 1];
       from ??= [px, py];
       // Shift: kare / daire, ok 45°'lik açılara oturur.
@@ -552,8 +590,9 @@ export class WriteMode {
           ? ellipsePath(x0, y0, x, y)
           : `M${x0} ${y0} L${x} ${y}`);
     }, () => {
+      cancelPick();
       live.done();
-      if (!from || Math.hypot((to[0] - from[0]) * at.w, (to[1] - from[1]) * at.h) < 6) return;
+      if (picked || !from || Math.hypot((to[0] - from[0]) * at.w, (to[1] - from[1]) * at.h) < 6) return;
       const m: Mark = { id: uid(), fileHash: this.fileHash, page: at.page, kind: "shape", shape: this.shape, color: this.color, width: this.width, from, to, createdAt: Date.now(), updatedAt: Date.now() };
       this.actions.add(m);
       this.record([{ add: m }]);
@@ -643,16 +682,27 @@ export class WriteMode {
     const pageEl = sel && this.viewer.pageElement(sel.page);
     if (!sel || !pageEl) return;
     // Tek metin kutusu ya da notta kutu gereksiz (kendi tutamacı ve düzenleme var).
-    if (sel.marks.length === 1 && (sel.marks[0].kind === "text" || sel.marks[0].kind === "sticky")) return;
+    // Düzenlenen kutuda seçim kutusu yok (biçim çubuğu var).
+    if (this.editingId && sel.marks.some((m) => m.id === this.editingId)) return;
     const [x, y, w, hh] = unionBox(sel.marks)!;
     const ink = sel.marks.filter((m) => m.kind === "ink");
     const btn = (name: string, title: string, run: () => void) =>
       h("button", { class: "cm-selbox__btn", title, "aria-label": title, onclick: (ev: Event) => (ev.stopPropagation(), run()) }, icon(name));
     const recolor = btn("recolor", `Seçimi ${colorLabel(this.color)} yap`, () => this.recolorSelected(this.color));
     recolor.style.color = inkCss(this.color);
+    const stickies = sel.marks.filter((m) => m.kind === "sticky");
+    // Yapışkan not rengi (AI notu dahil): pastel tonlar.
+    const tints = stickies.length ? STICKY_TINTS.map((t) => {
+      const cur = (stickies[0] as Extract<Mark, { kind: "sticky" }>).tint ?? "yellow";
+      const b = h("button", { class: `cm-selbox__tint cm-sticky-tint--${t}${cur === t ? " is-on" : ""}`, title: `Not rengi: ${TINT_LABEL[t]}`, "aria-label": `Not rengi: ${TINT_LABEL[t]}`, "aria-pressed": String(cur === t), onclick: (ev: Event) => (ev.stopPropagation(), this.setTint(t)) });
+      return b;
+    }) : [];
+    const onlyStickies = stickies.length === sel.marks.length;
     const bar = h("div", { class: "cm-selbox__bar", role: "toolbar", "aria-label": "Seçim" },
       h("span", { class: "cm-num cm-selbox__count", title: "Seçili işaret", text: `${sel.marks.length}` }),
-      recolor,
+      ...(onlyStickies ? [] : [recolor]),
+      ...tints,
+      ...(sel.marks.length === 1 && (sel.marks[0].kind === "text" || sel.marks[0].kind === "sticky") ? [btn("edit", "Düzenle (çift tıkla)", () => this.edit(sel.marks[0].id))] : []),
       ...(ink.length ? [btn("straighten", "Düzleştir", () => this.straighten())] : []),
       ...(ink.length && this.actions.handwriting ? [
         btn("totext", "Metne çevir", () => this.actions.handwriting!(ink, sel.page, "text")),
@@ -820,7 +870,7 @@ export class WriteMode {
   }
 
   private pick(e: PointerEvent, at: NonNullable<ReturnType<WriteMode["pageAt"]>>, editOnClick = false): void {
-    const hit = [...this.actions.marks()].reverse().find((m) => m.page === at.page && hitMark(m, at.x, at.y, at.w, at.h));
+    const hit = this.hitAt(at);
     if (e.shiftKey) {
       if (hit) this.select(hit.id, true);
       return;

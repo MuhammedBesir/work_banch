@@ -35,6 +35,11 @@ const PATHS: Record<string, string> = {
   copy: "M7 7h9v9H7zM4 13V4h9",
   trash: "M4 6h12M8 6V4h4v2M6 6l1 11h6l1-11",
   play: "M6 4l10 6-10 6z",
+  edit: "M4 16h3.5L16 7.5 12.5 4 4 12.5zM11 5.5l3.5 3.5",
+  expand: "M11 3h6v6M9 17H3v-6M17 3l-6 6M3 17l6-6",
+  collapse: "M15 9h-4V5M5 11h4v4M11 9l6-6M9 11l-6 6",
+  area: "M3 6V3h3M14 3h3v3M17 14v3h-3M6 17H3v-3M7 3h2M11 3h2M7 17h2M11 17h2M3 8v4M17 8v4",
+  quiz: "M4 3h12v14H4zM7 7h6M7 10.5h6M7 14h3",
   // üst çubuk
   search: "M8.5 3.5a5 5 0 110 10 5 5 0 010-10zM12.2 12.2L16.5 16.5",
   moon: "M15.5 12.5A6.5 6.5 0 017.5 4.5a6.5 6.5 0 108 8z",

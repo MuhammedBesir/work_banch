@@ -112,11 +112,13 @@ export function markBox(m: Mark): Rect {
  * Silgi ve seçim için isabet: nokta piksel cinsinden `tol` kadar yakın mı?
  * `w`, `h` sayfanın o anki piksel boyutu (sayfa oranı farklı eksenlerde farklı ölçeklenir).
  */
-export function hitMark(m: Mark, x: number, y: number, w: number, h: number, tol = 8): boolean {
+export function hitMark(m: Mark, x: number, y: number, w: number, h: number, tol = 8, inside = false): boolean {
   const toPx = ([a, b]: Pt): Pt => [a * w, b * h];
   const p = toPx([x, y]);
   if (m.kind === "ink") {
     const pts = m.points.map(toPx);
+    // Kapalı köşeli şekil (tanınmış üçgen, dörtgen): içi de sayılır.
+    if (inside && m.straight && pts.length > 3 && pointInPolygon(p, pts)) return true;
     if (pts.length === 1) return segDistSq(p, pts[0], pts[0]) <= tol * tol;
     for (let i = 1; i < pts.length; i++) if (segDistSq(p, pts[i - 1], pts[i]) <= tol * tol) return true;
     return false;
@@ -127,6 +129,13 @@ export function hitMark(m: Mark, x: number, y: number, w: number, h: number, tol
     if (m.shape === "arrow") return segDistSq(p, a, b) <= tol * tol;
     const [x0, x1] = [Math.min(a[0], b[0]), Math.max(a[0], b[0])];
     const [y0, y1] = [Math.min(a[1], b[1]), Math.max(a[1], b[1])];
+    // Seçerken şeklin içi de sayılır (yalnızca ince kenarına basmak zor).
+    if (inside && p[0] >= x0 - tol && p[0] <= x1 + tol && p[1] >= y0 - tol && p[1] <= y1 + tol) {
+      if (m.shape === "rect") return true;
+      const rx = (x1 - x0) / 2 || 1;
+      const ry = (y1 - y0) / 2 || 1;
+      if (Math.hypot((p[0] - (x0 + rx)) / (rx + tol), (p[1] - (y0 + ry)) / (ry + tol)) <= 1) return true;
+    }
     if (m.shape === "rect") {
       const edges: [Pt, Pt][] = [[[x0, y0], [x1, y0]], [[x1, y0], [x1, y1]], [[x1, y1], [x0, y1]], [[x0, y1], [x0, y0]]];
       return edges.some(([e0, e1]) => segDistSq(p, e0, e1) <= tol * tol);
@@ -290,7 +299,7 @@ export function scaleMark<M extends Mark>(m: M, ox: number, oy: number, sx: numb
   if (m.kind === "shape") return { ...m, from: sp(m.from), to: sp(m.to) } as M;
   const [x, y, w, h] = (m as Extract<Mark, { box: Rect }>).box;
   const [nx, ny] = sp([x, y]);
-  if (m.kind === "sticky") return { ...m, box: [nx, ny, w, h] as Rect };
+  if (m.kind === "sticky") return { ...m, box: [nx, ny, Math.max(0.08, w * sx), h] as Rect };
   if (m.kind === "text") return { ...m, box: [nx, ny, w * sx, h * sy] as Rect, size: Math.max(6, Math.round((m.size ?? 14) * Math.sqrt(sx * sy))) } as M;
   return { ...m, box: [nx, ny, w * sx, h * sy] as Rect };
 }

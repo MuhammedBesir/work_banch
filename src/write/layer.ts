@@ -126,7 +126,7 @@ export function renderMarks(pageEl: HTMLElement, page: number, marks: Mark[], o:
         onclick: (e: Event) => (e.stopPropagation(), o.onSticky?.(m.id, !m.collapsed)),
       }, m.collapsed ? "" : "–");
       const note = h("div", {
-        class: `cm-sticky${m.collapsed ? " is-collapsed" : ""}${selected ? " is-selected" : ""}${m.ai ? " is-ai" : ""}`,
+        class: `cm-sticky${m.tint && m.tint !== "yellow" ? ` cm-sticky--${m.tint}` : ""}${m.collapsed ? " is-collapsed" : ""}${selected ? " is-selected" : ""}${m.ai ? " is-ai" : ""}`,
         "data-id": m.id,
         role: "note",
         "aria-label": `${stickyLabel(m)}, sayfa ${page + 1}`,

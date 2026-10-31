@@ -31,6 +31,10 @@ import { Viewer, type SelectionPart } from "./pdf/viewer";
 import { PageEditor, type EditPage } from "./editor/pageEditor";
 import { chatMarkdown, type AiContext, type Cite, type SavedTurn } from "./ai/prompt";
 import type { AiSettings, Card, Color, FileRecord, Highlight, Mark, Rect, Settings, Recording } from "./types";
+import { askSimple, friendlyError as aiError, ready as aiReady, visionReady } from "./ai/client";
+import { QuizSection } from "./quiz/view";
+import { askQuiz, type QuizScope } from "./quiz/dialog";
+import { parseQuiz, QTYPES, QUIZ_SYSTEM, quizMarkdown, quizPrompt, type Quiz, type QuizRequest } from "./quiz/quiz";
 import { COLORS } from "./types";
 import { announce, download, h, isTyping, sha256, uid } from "./util";
 import { confirmDialog } from "./ui/dialog";
@@ -130,6 +134,10 @@ let hwPages = new Map<number, OcrPage & { sig: string }>();
 let hwRun: { stop: boolean } | null = null;
 /** Bu dosyanın ses kayıtları ve sürmekte olan kaydın kimliği. */
 let recordings: Recording[] = [];
+/** Bu dosyanın AI quizleri (meta `quiz:<hash>`) ve son sayfanın altındaki bölüm. */
+let quizzes: Quiz[] = [];
+let quizView: QuizSection | null = null;
+let lastQuiz: QuizRequest | undefined;
 let recId: string | null = null;
 let rightTab: "marks" | "ai" = "marks";
 /** Son metin seçimi: AI'nın "Seçim" kapsamı için (Sor düğmesine basınca seçim kaybolsa da kalır). */
@@ -156,6 +164,7 @@ function applySettings(): void {
     reader.themeBtn.title = dark ? "Açık tema" : "Koyu tema";
     reader.panel.setData(highlights, settings.names, marks);
     updateAiUi();
+    quizView?.render(quizzes);
   }
 }
 
@@ -270,6 +279,7 @@ function updateAiUi(): void {
 function showRightTab(tab: "marks" | "ai"): void {
   if (!reader) return;
   rightTab = tab;
+  if (tab !== "ai" && reader.ai.isFull) reader.ai.setFull(false);
   reader.panel.el.hidden = tab !== "marks";
   reader.ai.el.hidden = tab !== "ai";
   reader.rtabs.querySelectorAll<HTMLButtonElement>(".cm-tab").forEach((b) => {
@@ -788,6 +798,8 @@ async function reloadHighlights(): Promise<void> {
 function closeReader(): void {
   if (!reader) return;
   if (reader.recorder.state !== "idle") void finishRecording(reader);
+  quizView = null;
+  area = null;
   reader.audio.close();
   if (ocrRun) {
     ocrRun.stop = true;
@@ -1046,8 +1058,11 @@ async function openReader(file: OpenDoc): Promise<void> {
   stageWrap.append(audio.el);
 
   const ai = new AiPanel({
+    fullscreen: (on) => reader?.body.classList.toggle("is-ai-full", on),
     settings: () => settings.ai,
-    context: (scope) => aiContext(scope),
+    context: (scope, withImage) => aiContext(scope, withImage),
+    pickArea: () => void pickArea(),
+    vision: () => visionReady(settings.ai),
     counts: () => ({ selection: !!lastSelection, hl2: highlights.filter((x) => x.color === 2).length, hl4: highlights.filter((x) => x.color === 4).length }),
     citeHover: (c) => void showCite(c),
     citeJump: (c) => void jumpCite(c),
@@ -1065,6 +1080,8 @@ async function openReader(file: OpenDoc): Promise<void> {
     h("button", { class: `cm-tab${id === "marks" ? " is-on" : ""}`, role: "tab", "data-tab": id, "aria-selected": String(id === "marks"), onclick: () => showRightTab(id) }, label);
   const rtabs = h("div", { class: "cm-tabs cm-rtabs", role: "tablist", hidden: true }, tab("marks", "İşaretler"), tab("ai", "AI"));
   const right = h("div", { class: "cm-right" }, rtabs, panel.el, ai.el);
+  // Genişlik tutamacı sağ sütunda: İşaretler ve AI sekmesinde de çalışır.
+  right.prepend(panel.resizeEl);
 
   const body = h("div", { class: "cm-body" }, rail.el, stageWrap, right);
   // Mobil: yüzen çubuk ve kalabalık üst bar yerine alta sabit gezinme.
@@ -1090,6 +1107,50 @@ async function openReader(file: OpenDoc): Promise<void> {
   updateLayout();
   bindFocusPeek(root);
 
+  // Oku modunda da yapışkan notlar (AI notu dahil) sürüklenerek taşınır; çift tıklayınca Yaz modunda düzenlenir.
+  viewer.root.addEventListener("pointerdown", (e) => {
+    if (reader?.mode !== "read" || e.button > 0) return;
+    const t = e.target as HTMLElement;
+    const el = t.closest<HTMLElement>(".cm-sticky");
+    if (!el || t.closest(".cm-sticky__toggle, .cm-rich__check input")) return;
+    const m = marks.find((x) => x.id === el.dataset.id);
+    const pageEl = el.closest<HTMLElement>(".cm-page");
+    if (m?.kind !== "sticky" || !pageEl) return;
+    e.preventDefault();
+    const box = pageEl.getBoundingClientRect();
+    const x0 = e.clientX;
+    const y0 = e.clientY;
+    let dx = 0;
+    let dy = 0;
+    el.classList.add("is-dragging");
+    const move = (ev: PointerEvent) => {
+      if (ev.pointerId !== e.pointerId) return;
+      dx = ev.clientX - x0;
+      dy = ev.clientY - y0;
+      el.style.translate = `${dx}px ${dy}px`;
+    };
+    const up = (ev: PointerEvent) => {
+      if (ev.pointerId !== e.pointerId) return;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      el.classList.remove("is-dragging");
+      el.style.translate = "";
+      if (Math.hypot(dx, dy) < 3) return;
+      const [x, y, w, hh] = m.box;
+      const nx = Math.min(1 - Math.min(w, 0.05), Math.max(0, x + dx / box.width));
+      const ny = Math.min(0.97, Math.max(0, y + dy / box.height));
+      updateMark({ ...m, box: [nx, ny, w, hh], updatedAt: Date.now() });
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  });
+  viewer.root.addEventListener("dblclick", (e) => {
+    if (reader?.mode !== "read") return;
+    const id = (e.target as HTMLElement).closest<HTMLElement>(".cm-sticky")?.dataset.id;
+    if (id) void setMode("write").then(() => (reader?.write.setTool("select"), reader?.write.edit(id)));
+  });
   viewer.ocrFor = (p) => ocrPages.get(p) ?? null;
   viewer.hwFor = (p) => hwPages.get(p) ?? null;
   await viewer.init((p) => byPage.get(p) ?? [], file.rec.lastPage);
@@ -1102,6 +1163,24 @@ async function openReader(file: OpenDoc): Promise<void> {
   void saveThumb(file);
   // Not defteri: sonsuz defter gibi, en altta sayfa ekle.
   if (file.rec.notebook) viewer.root.append(h("button", { class: "cm-btn cm-pages__add", onclick: () => void appendNotebookPage() }, "+ Sona sayfa ekle"));
+  // Son sayfanın altında: AI ile quiz.
+  quizzes = (await db.getMeta<Quiz[]>(`quiz:${file.rec.hash}`)) ?? [];
+  quizView = new QuizSection({
+    create: () => void createQuiz(),
+    remove: async (id) => {
+      if (!(await confirmDialog({ title: "Quiz silinsin mi?", text: "Bu quiz ve cevapların silinir.", ok: "Sil", danger: true }))) return;
+      quizzes = quizzes.filter((q) => q.id !== id);
+      void db.putMeta(`quiz:${file.rec.hash}`, quizzes);
+      quizView?.render(quizzes);
+    },
+    goTo: (p) => reader?.viewer.goTo(Math.min(p, (reader?.viewer.pageCount ?? 1) - 1)),
+    exportMd: (qz) => download(`${file.rec.name.replace(/\.pdf$/i, "")}-quiz.md`, quizMarkdown(qz), "text/markdown;charset=utf-8"),
+    toCards: (qz) => quizToCards(qz),
+    aiReady: () => aiOn() && aiReady(settings.ai),
+    openAiSettings: aiSetup,
+  });
+  viewer.root.append(quizView.el);
+  quizView.render(quizzes);
   rail.setBookmarks(file.rec.bookmarks);
   stage.focus({ preventScroll: true });
   if (file.rec.lastPage > 0) toast(`Kaldığın yerden: sayfa ${num(file.rec.lastPage + 1)}`);
@@ -1933,8 +2012,227 @@ function sectionRange(outline: OutlineItem[], page: number): [number, number] | 
   return [start, (next ?? reader!.viewer.pageCount) - 1];
 }
 
+// ---------- AI ile quiz ----------
+
+/** Quiz kapsamının metni: uzun belgede her sayfadan dengeli parça (bütçe aşılmaz). */
+async function quizContext(scope: QuizScope): Promise<{ label: string; text: string } | { error: string }> {
+  if (!reader) return { error: "Açık dosya yok." };
+  const budget = settings.ai.mode === "device" ? 6000 : 60000;
+  if (scope.kind === "highlights") {
+    const c = await aiContext("highlights");
+    if ("error" in c) return c;
+    return { label: c.label, text: c.pages.map((p) => `<sayfa no="${p.page + 1}">\n${p.text}\n</sayfa>`).join("\n") };
+  }
+  const cur = reader.viewer.current;
+  const [a, b] = scope.kind === "all" ? [0, reader.viewer.pageCount - 1] : scope.kind === "page" ? [cur, cur] : [scope.from, scope.to];
+  const texts: { page: number; text: string }[] = [];
+  for (let i = a; i <= b; i++) {
+    const t = (await textOf(i)).replace(/\s+\n/g, "\n").trim();
+    if (t) texts.push({ page: i, text: t });
+  }
+  if (!texts.length) return { error: "Bu kapsamda metin yok (taranmışsa önce Metni tanıt (OCR))." };
+  const total = texts.reduce((n, p) => n + p.text.length, 0);
+  const share = total > budget ? budget / total : 1;
+  const text = texts.map((p) => `<sayfa no="${p.page + 1}">\n${share < 1 ? p.text.slice(0, Math.max(200, Math.floor(p.text.length * share))) : p.text}\n</sayfa>`).join("\n");
+  const label = a === b ? `s. ${num(a + 1)}` : `s. ${num(a + 1)}–${num(b + 1)}${share < 1 ? " (kısaltıldı)" : ""}`;
+  return { label, text };
+}
+
+async function createQuiz(): Promise<void> {
+  if (!reader || !quizView) return;
+  const r = reader;
+  const choice = await askQuiz({ pageCount: r.viewer.pageCount, current: r.viewer.current, highlights: highlights.length, last: lastQuiz });
+  if (!choice) return;
+  lastQuiz = choice.req;
+  const ctx = await quizContext(choice.scope);
+  if ("error" in ctx) return void toast(ctx.error);
+  const names = Object.fromEntries(QTYPES) as Record<string, string>;
+  quizView.setBusy(`${choice.req.count} soruluk quiz hazırlanıyor (${ctx.label})… Uzun belgede bir dakika sürebilir.`);
+  try {
+    let got = 0;
+    const out = await askSimple(settings.ai, {
+      system: QUIZ_SYSTEM,
+      text: `<belge>\n${ctx.text}\n</belge>\n\n${quizPrompt(choice.req, names)}`,
+      signal: new AbortController().signal,
+      onText: (t) => {
+        got += t.length;
+        if (got % 400 < t.length) quizView?.setBusy(`Sorular yazılıyor… (${num(got)} karakter)`);
+      },
+    });
+    const parsed = parseQuiz(out);
+    if (!parsed) {
+      quizView.setBusy("");
+      toast("AI'nın cevabı quiz biçiminde değildi. Yeniden dene ya da daha az soru iste.", undefined, 7000);
+      return;
+    }
+    const typesLabel = choice.req.types.map((t) => names[t]).join(", ");
+    const qz: Quiz = {
+      id: uid(), title: parsed.title, createdAt: Date.now(), questions: parsed.questions,
+      summary: `${parsed.questions.length} soru · ${typesLabel} · ${choice.req.level} · ${ctx.label}`,
+    };
+    if (reader !== r) return;
+    quizzes = [...quizzes, qz];
+    await db.putMeta(`quiz:${r.file.rec.hash}`, quizzes);
+    quizView.setBusy("");
+    quizView.render(quizzes);
+    quizView.el.scrollIntoView({ block: "start", behavior: "smooth" });
+    announce(`Quiz hazır: ${parsed.questions.length} soru`);
+  } catch (err) {
+    quizView.setBusy("");
+    const e = await aiError(settings.ai, err);
+    toast(`${e.title}. ${e.text}`, undefined, 8000);
+  }
+}
+
+/** Quiz soruları Tekrar modu kartı olur (soru ön yüz, cevap ve açıklama arka yüz). */
+function quizToCards(qz: Quiz): void {
+  if (!reader) return;
+  const now = Date.now();
+  const made: Card[] = qz.questions.map((q) => {
+    const front = q.type === "mc" ? `${q.q}\n${q.options!.map((o, k) => `${String.fromCharCode(65 + k)}) ${o}`).join("\n")}` : q.type === "tf" ? `Doğru mu, yanlış mı? ${q.q}` : q.q;
+    const ans = q.type === "mc" ? `${String.fromCharCode(65 + (q.answer as number))}) ${q.options![q.answer as number]}` : q.type === "tf" ? (q.answer ? "Doğru" : "Yanlış") : String(q.answer);
+    return {
+      id: uid(), fileHash: reader!.file.rec.hash, page: Math.max(0, (q.page ?? 1) - 1), source: "ai", front, back: q.explanation ? `${ans}\n${q.explanation}` : ans,
+      status: "active", ...freshSchedule(now), createdAt: now, updatedAt: now,
+    } as Card;
+  });
+  cards = [...cards, ...made];
+  void db.putCards(made);
+  toast(`${num(made.length)} kart Tekrar moduna eklendi (Alt T).`);
+}
+
+// ---------- Alan seç ve sor ----------
+
+/** Son seçilen alan: sayfa, kutu (0–1), görüntüsü ve içindeki metin. */
+let area: { file: string; page: number; rect: Rect; text: string; image: NonNullable<AiContext["image"]> } | null = null;
+
+/** Sayfanın bir bölgesini (işaretler hariç, PDF'in kendisi) yüksek çözünürlükte çiz. */
+async function areaCanvas(page: number, rect: Rect, maxSide: number): Promise<HTMLCanvasElement | null> {
+  if (!reader) return null;
+  const p = await reader.file.doc.getPage(page + 1);
+  const vp1 = p.getViewport({ scale: 1 });
+  const [x, y, w, hh] = rect;
+  const scale = Math.min(4, maxSide / Math.max(w * vp1.width, hh * vp1.height));
+  const vp = p.getViewport({ scale });
+  const c = document.createElement("canvas");
+  c.width = Math.max(1, Math.round(w * vp.width));
+  c.height = Math.max(1, Math.round(hh * vp.height));
+  const ctx = c.getContext("2d")!;
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, c.width, c.height);
+  // Bölgenin dışı çizilmez: görünüm kaydırılır.
+  await p.render({ canvasContext: ctx, viewport: vp, transform: [1, 0, 0, 1, -x * vp.width, -y * vp.height] }).promise;
+  return c;
+}
+
+async function pageImage(page: number, rect: Rect, maxSide: number): Promise<AiContext["image"]> {
+  const c = await areaCanvas(page, rect, maxSide);
+  if (!c) return undefined;
+  const png = c.width * c.height < 1_200_000;
+  const url = c.toDataURL(png ? "image/png" : "image/jpeg", 0.9);
+  const t = document.createElement("canvas");
+  const k = Math.min(1, 220 / c.width);
+  t.width = Math.round(c.width * k);
+  t.height = Math.round(c.height * k);
+  t.getContext("2d")!.drawImage(c, 0, 0, t.width, t.height);
+  return { base64: url.split(",")[1], mediaType: png ? "image/png" : "image/jpeg", thumb: t.toDataURL("image/jpeg", 0.8) };
+}
+
+/** Metin katmanında kutunun içindeki yazı (satır sırasıyla). */
+async function textInRect(page: number, rect: Rect): Promise<string> {
+  if (!reader) return "";
+  const layer = await reader.viewer.whenText(page);
+  const box = reader.viewer.pageElement(page)!.getBoundingClientRect();
+  const [x, y, w, hh] = rect;
+  const parts: { t: string; top: number; left: number }[] = [];
+  for (const span of layer.querySelectorAll<HTMLElement>("span")) {
+    if (!span.textContent?.trim() || span.querySelector("span")) continue;
+    const r = span.getBoundingClientRect();
+    const cx = (r.left + r.width / 2 - box.left) / box.width;
+    const cy = (r.top + r.height / 2 - box.top) / box.height;
+    if (cx >= x && cx <= x + w && cy >= y && cy <= y + hh) parts.push({ t: span.textContent, top: Math.round(cy * 400), left: cx });
+  }
+  parts.sort((a, b) => a.top - b.top || a.left - b.left);
+  let out = "";
+  let line = -1;
+  for (const p of parts) {
+    out += line === -1 ? p.t : p.top !== line ? `\n${p.t}` : p.t;
+    line = p.top;
+  }
+  return out.replace(/[ \t]+/g, " ").trim();
+}
+
+/**
+ * Alan seç: sayfada sürükleyerek bir kutu çiz (fare, kalem ya da parmak). Kutunun görüntüsü ve
+ * içindeki metin AI kapsamı olur; şekil, formül ve tablolar da görülür. Esc vazgeçer.
+ */
+async function pickArea(): Promise<void> {
+  if (!reader) return;
+  const r = reader;
+  const narrow = isNarrow();
+  if (narrow && panelOpen) togglePanel(false);
+  if (r.ai.isFull) r.ai.setFull(false);
+  const root = r.viewer.root;
+  root.classList.add("is-area-pick");
+  const hint = h("div", { class: "cm-areahint", role: "status", text: "Sormak istediğin yeri sürükleyerek çerçevele · Esc vazgeç" });
+  r.stage.parentElement?.append(hint);
+  announce("Alan seç: sormak istediğin yeri sürükleyerek çerçevele");
+  const rect = await new Promise<{ page: number; rect: Rect } | null>((resolve) => {
+    const finish = (v: { page: number; rect: Rect } | null) => {
+      root.removeEventListener("pointerdown", down, true);
+      document.removeEventListener("keydown", key, true);
+      root.classList.remove("is-area-pick");
+      hint.remove();
+      resolve(v);
+    };
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        finish(null);
+      }
+    };
+    const down = (e: PointerEvent) => {
+      const pageEl = (e.target as HTMLElement).closest<HTMLElement>(".cm-page");
+      if (!pageEl) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const b = pageEl.getBoundingClientRect();
+      const x0 = (e.clientX - b.left) / b.width;
+      const y0 = (e.clientY - b.top) / b.height;
+      const box = h("div", { class: "cm-areabox" });
+      pageEl.append(box);
+      let cur: Rect = [x0, y0, 0, 0];
+      const move = (ev: PointerEvent) => {
+        const x1 = Math.min(1, Math.max(0, (ev.clientX - b.left) / b.width));
+        const y1 = Math.min(1, Math.max(0, (ev.clientY - b.top) / b.height));
+        cur = [Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0)];
+        box.style.cssText = `left:${cur[0] * 100}%;top:${cur[1] * 100}%;width:${cur[2] * 100}%;height:${cur[3] * 100}%`;
+      };
+      const up = () => {
+        window.removeEventListener("pointermove", move, true);
+        window.removeEventListener("pointerup", up, true);
+        box.remove();
+        // Çok küçük çerçeve: tıklama sayılır, seçim sürer.
+        if (cur[2] * b.width < 12 || cur[3] * b.height < 12) return;
+        finish({ page: Number(pageEl.dataset.page), rect: cur });
+      };
+      window.addEventListener("pointermove", move, true);
+      window.addEventListener("pointerup", up, true);
+    };
+    root.addEventListener("pointerdown", down, true);
+    document.addEventListener("keydown", key, true);
+  });
+  if (!rect || reader !== r) return;
+  const [text, image] = await Promise.all([textInRect(rect.page, rect.rect), pageImage(rect.page, rect.rect, 1400)]);
+  area = { file: r.file.rec.hash, page: rect.page, rect: rect.rect, text, image: image! };
+  if (!panelOpen) togglePanel(true);
+  showRightTab("ai");
+  r.ai.areaPicked();
+}
+
 /** Kapsamın metni. Dosyanın tamamı asla kendiliğinden gönderilmez; uzun kapsam kırpılmaz, söylenir. */
-async function aiContext(scope: Scope): Promise<AiContext | { error: string }> {
+async function aiContext(scope: Scope, withImage = false): Promise<AiContext | { error: string }> {
   if (!reader) return { error: "Açık dosya yok." };
   const cur = reader.viewer.current;
   const hlPages = (list: Highlight[], label: string, withWriting = false): AiContext | { error: string } => {
@@ -1971,8 +2269,26 @@ async function aiContext(scope: Scope): Promise<AiContext | { error: string }> {
     }
     case "page": {
       const text = await textOf(cur);
-      if (!text.trim()) return { error: "Bu sayfada seçilebilir metin yok (taranmış olabilir). Dosya menüsünden Metni tanıt (OCR) ile metni çıkar." };
-      return { label: `sayfa ${num(cur + 1)} metni`, pages: [{ page: cur, text }] };
+      // Görüntü de gidiyorsa metni olmayan (taranmış, şekilli) sayfa da sorulabilir.
+      const image = withImage && visionReady(settings.ai) ? await pageImage(cur, [0, 0, 1, 1], 1400) : undefined;
+      if (!text.trim() && !image) return { error: "Bu sayfada seçilebilir metin yok (taranmış olabilir). Alan seç ile sor ya da Dosya menüsünden Metni tanıt (OCR)." };
+      return { label: `sayfa ${num(cur + 1)}`, pages: [{ page: cur, text: text.trim() ? text : "(Bu sayfada seçilebilir metin yok; görüntüye bak.)" }], image };
+    }
+    case "area": {
+      if (!area || area.file !== reader.file.rec.hash) return { error: "Önce Alan seç ile sayfada sormak istediğin yeri çerçevele." };
+      const vision = visionReady(settings.ai);
+      let text = area.text;
+      // Görüntü gönderemeyen sağlayıcıda (cihazda, yerel) alanın yazısı bu cihazda tanınır.
+      if (!vision && !text.trim()) {
+        const canvas = await areaCanvas(area.page, area.rect, 1600);
+        text = canvas ? (await recognizeCanvas(canvas)).text : "";
+      }
+      if (!vision && !text.trim()) return { error: "Bu alanda metin yok. Şekil ve formülleri okutmak için görüntü destekleyen bir AI seç (Gemini, Claude, OpenAI)." };
+      return {
+        label: `seçilen alan (s. ${num(area.page + 1)})`,
+        pages: [{ page: area.page, text: text.trim() ? text : "(Bu alanda seçilebilir metin yok; görüntüye bak.)" }],
+        image: vision ? area.image : undefined,
+      };
     }
     case "section": {
       const range = sectionRange(reader.outline, cur);
@@ -2145,6 +2461,18 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   if (review) return; // Tekrar modu kendi kısayollarını işler
+  // AI tam ekrandayken Esc geri getirir.
+  if (e.key === "Escape" && r.ai.isFull && !isTyping(e)) {
+    e.preventDefault();
+    r.ai.setFull(false);
+    return;
+  }
+  // Shift A: alan seç ve AI'ya sor (şekil, formül, tablo dahil).
+  if (e.shiftKey && !ctrl && !e.altKey && e.code === "KeyA" && !isTyping(e) && aiOn() && r.mode !== "edit") {
+    e.preventDefault();
+    void pickArea();
+    return;
+  }
   if (e.altKey && !ctrl && e.code === "KeyR") {
     e.preventDefault();
     if (r.recorder.state === "idle") void startRecording();

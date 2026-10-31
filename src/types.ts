@@ -23,6 +23,10 @@ export interface Highlight {
 
 export type PenColor = "black" | "blue" | "red";
 export const PEN_COLORS: readonly PenColor[] = ["black", "blue", "red"];
+/** Yapışkan not rengi. */
+export type StickyTint = "yellow" | "pink" | "blue" | "green" | "purple" | "gray";
+export const STICKY_TINTS: readonly StickyTint[] = ["yellow", "pink", "blue", "green", "purple", "gray"];
+
 /** Kalem rengi: üç hazır renk ya da özel renk (`#rrggbb`). */
 export type InkColor = PenColor | `#${string}`;
 export type ShapeKind = "rect" | "ellipse" | "arrow";
@@ -40,7 +44,7 @@ export type Mark =
     })
   | (MarkBase & { kind: "shape"; color: InkColor; width: number; shape: ShapeKind; from: [number, number]; to: [number, number] })
   | (MarkBase & { kind: "text"; color: InkColor; box: Rect; text: string; size?: number })
-  | (MarkBase & { kind: "sticky"; box: Rect; text: string; collapsed?: boolean; ai?: boolean; pageNote?: boolean })
+  | (MarkBase & { kind: "sticky"; box: Rect; text: string; collapsed?: boolean; ai?: boolean; pageNote?: boolean; tint?: StickyTint })
   | (MarkBase & { kind: "image"; box: Rect; src: string; alt: string });
 
 export interface MarkBase {

@@ -83,7 +83,8 @@ Tek tarayıcı için `npx playwright test --project=chromium` (projeler: `chromi
 
 - **Kalem türleri:** tükenmez, kurşun kalem, fosforlu (yarı saydam), dolma kalem (açılı uç, yöne göre kalınlık). Üç hazır renk + 12 özel ton ve renk seçici; son kullanılan özel renkler palette kalır.
 - **Kısmi silgi** (çizginin değdiği kısmı siler) ya da **bütün çizgi**. Kalemin yan tuşu ya da silgi ucu basılıyken geçici silgi.
-- **Taşıma:** Seç aracında (`V`) işarete basıp sürükle; parmakla da olur. Herhangi bir araçta bir yazının ya da şeklin üstünde kıpırdamadan basılı tutunca (~0,5 sn) seçilir. Metin aracında var olan kutuyu sürükleyince taşınır, tıklayınca düzenlenir.
+- **Yapışkan notlar** (AI notları dahil) Oku modunda da sürüklenerek taşınır, çift tıklayınca düzenlenir; seçince altı renkten biri verilebilir ve köşeden genişletilir.
+- **Taşıma:** Seç aracında (`V`) işarete basıp sürükle; parmakla da olur. Şeklin içine basmak yeter. Herhangi bir araçta bir yazının ya da şeklin üstünde kıpırdamadan basılı tutunca (~0,5 sn) seçilir. Metin aracında var olan kutuyu sürükleyince taşınır, tıklayınca düzenlenir.
 - **Kement** (`L`): çizerek seç; seçim kutusunun köşesinden **boyutlandır** (`Shift` oranı korur), sürükleyerek taşı, **renk değiştir**, çoğalt, sil.
 - **Çiz ve bekle:** kalemi bir an yerinde tutunca düz çizgi, üçgen, dörtgen, dikdörtgen ve elips düzeltilir.
 - **El yazısını düzleştir**, **metne çevir** ve **matematiği çöz** (kement çubuğundan): bu cihazda (OCR) ya da görsel destekleyen AI ile (Claude, OpenAI; yalnızca seçimin görseli gider).
@@ -98,6 +99,12 @@ Tek tarayıcı için `npx playwright test --project=chromium` (projeler: `chromi
 - **AI:** "Notlarımı düzenle" (vurgu, not ve el yazısından düzenli çalışma notu) ve "Bu sayfayı çevir".
 
 Bilerek yok: gerçek zamanlı ortak düzenleme ve hesapla bulut eşitleme (sunucu ve hesap gerektirir; uygulama bilerek sunucusuz).
+
+## AI ile quiz ve alan seç
+
+- **Quiz:** belgenin son sayfasının altında *AI ile quiz oluştur*. Soru tipleri (çoktan seçmeli, doğru/yanlış, boşluk doldurma, kısa cevap, klasik), sayı, zorluk, kapsam (tüm belge, bu sayfa, sayfa aralığı, vurgularım) ve serbest ek istek ("vize formatında, her soru 10 puan"). Quiz sayfanın altında etkileşimli: şık seç, *Kontrol et* ile puan, her sorunun açıklaması ve dayandığı sayfa. Markdown indir, Tekrar moduna kart olarak ekle.
+- **Alan seç ve sor** (`Shift A` ya da AI panelinde *Alan seç*): sayfada istediğin yeri fareyle, kalemle ya da parmakla çerçevele. Alanın görüntüsü ve metni gider; şekil, formül, grafik ve tablolar da görülür (Gemini, Claude, OpenAI). Görüntü göndermeyen sağlayıcıda alanın yazısı bu cihazda tanınır. *Bu sayfa* kapsamında da "Görüntüsünü de gönder" seçilebilir.
+- **AI penceresi** sol kenarından sürüklenerek ekranın %70'ine kadar genişler; başlıktaki düğmeyle tam ekran olur (Esc ile çık).
 
 ## Tekrar modu
 

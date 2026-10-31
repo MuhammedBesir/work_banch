@@ -100,16 +100,19 @@ export class Panel {
     this.returnBar = h("div", { class: "cm-panel__follow", hidden: true },
       h("button", { class: "cm-btn cm-btn--sm", onclick: () => this.resumeFollow() }, "Okuduğum sayfaya dön"),
     );
+    // Tutamaç sağ sütunun (İşaretler ve AI sekmeleri) genişliğini değiştirir; sağ sütuna taşınır.
     const resize = h("div", {
       class: "cm-panel__resize", role: "separator", "aria-orientation": "vertical", "aria-label": "Panel genişliği", tabindex: "0",
-      "aria-valuemin": "280", "aria-valuemax": "480", "aria-valuenow": "340",
+      "aria-valuemin": "280", "aria-valuemax": String(maxPanel()), "aria-valuenow": "340",
     });
+    this.resizeEl = resize;
     this.bindResize(resize);
     const foot = h("div", { class: "cm-panel__foot" }, h("span", { class: "cm-trust", text: "Bu cihazda saklanıyor" }), h("span", {}, kbd("J"), " ", kbd("K"), " gez · ", kbd("Enter"), " atla"));
     this.el = h("aside", { class: "cm-panel", "aria-label": "Vurgular ve notlar" }, resize, head, this.list, this.returnBar, foot);
     new ResizeObserver(() => {
-      const w = Math.round(this.el.getBoundingClientRect().width);
-      if (w) resize.setAttribute("aria-valuenow", String(Math.min(480, Math.max(280, w))));
+      const w = Math.round(this.column().getBoundingClientRect().width);
+      resize.setAttribute("aria-valuemax", String(maxPanel()));
+      if (w) resize.setAttribute("aria-valuenow", String(Math.min(maxPanel(), Math.max(280, w))));
     }).observe(this.el);
   }
 
@@ -549,11 +552,18 @@ export class Panel {
     );
   }
 
+  /** Genişliği değişen sütun: sağ sütun (yoksa panelin kendisi). */
+  private column(): HTMLElement {
+    return this.resizeEl.parentElement ?? this.el;
+  }
+
+  readonly resizeEl!: HTMLElement;
+
   private bindResize(handle: HTMLElement): void {
     let startX = 0;
     let startW = 0;
     const move = (e: PointerEvent) => {
-      const w = Math.min(480, Math.max(280, startW + (startX - e.clientX)));
+      const w = Math.min(maxPanel(), Math.max(280, startW + (startX - e.clientX)));
       this.actions.resize(w);
     };
     const up = () => {
@@ -563,20 +573,23 @@ export class Panel {
     };
     handle.addEventListener("pointerdown", (e) => {
       startX = e.clientX;
-      startW = this.el.getBoundingClientRect().width;
+      startW = this.column().getBoundingClientRect().width;
       handle.classList.add("is-drag");
       window.addEventListener("pointermove", move);
       window.addEventListener("pointerup", up);
     });
     handle.addEventListener("keydown", (e) => {
-      const w = this.el.getBoundingClientRect().width;
-      if (e.key === "ArrowLeft") this.actions.resize(Math.min(480, w + 16));
+      const w = this.column().getBoundingClientRect().width;
+      if (e.key === "ArrowLeft") this.actions.resize(Math.min(maxPanel(), w + 16));
       else if (e.key === "ArrowRight") this.actions.resize(Math.max(280, w - 16));
       else return;
       e.preventDefault();
     });
   }
 }
+
+/** Sağ sütun en fazla pencerenin %70'i kadar genişler (AI cevaplarını rahat okumak için). */
+const maxPanel = () => Math.max(480, Math.round(window.innerWidth * 0.7));
 
 /** Grup başlıkları seçilemez; yalnızca satırlar klavyeyle gezilir. */
 const isRowKey = (k: string) => !k.startsWith("h:");

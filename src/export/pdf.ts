@@ -27,6 +27,8 @@ const HL: Record<Color, [number, number, number]> = {
   4: [0xbd, 0xdb, 0xa6],
 };
 const STICKY: [number, number, number] = [0xf3, 0xe7, 0xc4];
+const TINT: Record<string, [number, number, number]> = { pink: [0xf8, 0xd7, 0xe3], blue: [0xd6, 0xe6, 0xf5], green: [0xd9, 0xee, 0xd2], purple: [0xe6, 0xdc, 0xf3], gray: [0xe8, 0xe5, 0xdf] };
+const stickyRgb = (m: Mark) => (m.kind === "sticky" && m.tint && TINT[m.tint]) || STICKY;
 const INK = "#1f1d1a";
 
 const toRgb = ([r, g, b]: [number, number, number]): RGB => rgb(r / 255, g / 255, b / 255);
@@ -111,7 +113,7 @@ export async function exportAnnotatedPdf(source: Uint8Array, highlights: Highlig
       await drawImageMark(doc, g, m);
     } else if (m.text.trim()) {
       if (m.kind === "sticky" && (o.mode === "annotations" || m.collapsed)) {
-        addTextNote(doc, g, m.box, `${stickyLabel(m)}: ${richPlain(m.text)}`, STICKY);
+        addTextNote(doc, g, m.box, `${stickyLabel(m)}: ${richPlain(m.text)}`, stickyRgb(m));
       } else {
         await drawTextImage(doc, g, m);
       }
@@ -197,7 +199,7 @@ async function drawTextImage(doc: PDFDocument, g: PageGeom, m: Extract<Mark, { k
   canvas.width = Math.ceil(wPt * S);
   canvas.height = Math.ceil(hPt * S);
   if (sticky) {
-    ctx.fillStyle = css(STICKY);
+    ctx.fillStyle = css(stickyRgb(m));
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
   ctx.textBaseline = "top";

@@ -209,7 +209,7 @@ export async function moveFileData(from: string, to: string): Promise<void> {
       tx.onerror = () => reject(tx.error);
     });
   }
-  for (const k of ["ai", "ocr", "hw", "thumb"]) {
+  for (const k of ["ai", "ocr", "hw", "thumb", "quiz"]) {
     const v = await getMeta(`${k}:${from}`);
     if (v === undefined) continue;
     await putMeta(`${k}:${to}`, v);

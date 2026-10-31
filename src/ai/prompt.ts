@@ -5,6 +5,8 @@ export interface AiContext {
   label: string;
   /** Sayfa sayfa metin; her parça kaynak gösterilebilsin diye sayfa numarasıyla gider. */
   pages: { page: number; text: string }[];
+  /** Seçilen alanın ya da sayfanın görüntüsü (şekil, formül, tablo): görsel destekleyen sağlayıcıya gider. */
+  image?: { base64: string; mediaType: "image/png" | "image/jpeg"; thumb: string };
 }
 
 export interface Turn {
