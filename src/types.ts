@@ -17,18 +17,31 @@ export interface Highlight {
   updatedAt: number;
   /** Birden fazla sayfaya yayılan seçim: parçalar aynı grup kimliğini taşır ve tek vurgu gibi davranır. */
   group?: string;
+  /** Ses kaydı sırasında eklendiyse: kayıt ve kaydın başından itibaren milisaniye. */
+  rec?: { id: string; t: number };
 }
 
 export type PenColor = "black" | "blue" | "red";
 export const PEN_COLORS: readonly PenColor[] = ["black", "blue", "red"];
+/** Kalem rengi: üç hazır renk ya da özel renk (`#rrggbb`). */
+export type InkColor = PenColor | `#${string}`;
 export type ShapeKind = "rect" | "ellipse" | "arrow";
+/** Kalem türü: tükenmez (varsayılan), kurşun kalem, fosforlu kalem, dolma kalem (açılı uç). */
+export type PenKind = "pen" | "pencil" | "marker" | "fountain";
+export const PEN_KINDS: readonly PenKind[] = ["pen", "pencil", "marker", "fountain"];
 
 /** Yaz modundaki işaret. Koordinatlar sayfaya göre 0–1 arası. */
 export type Mark =
-  | (MarkBase & { kind: "ink"; color: PenColor; width: number; points: [number, number][]; pressures?: number[] })
-  | (MarkBase & { kind: "shape"; color: PenColor; width: number; shape: ShapeKind; from: [number, number]; to: [number, number] })
-  | (MarkBase & { kind: "text"; color: PenColor; box: Rect; text: string })
-  | (MarkBase & { kind: "sticky"; box: Rect; text: string; collapsed?: boolean; ai?: boolean; pageNote?: boolean });
+  | (MarkBase & {
+      kind: "ink"; color: InkColor; width: number; points: [number, number][]; pressures?: number[];
+      pen?: PenKind;
+      /** Şekil tanımadan gelen köşeli çizgi (düz çizgi, üçgen, çokgen): yumuşatılmaz. */
+      straight?: boolean;
+    })
+  | (MarkBase & { kind: "shape"; color: InkColor; width: number; shape: ShapeKind; from: [number, number]; to: [number, number] })
+  | (MarkBase & { kind: "text"; color: InkColor; box: Rect; text: string; size?: number })
+  | (MarkBase & { kind: "sticky"; box: Rect; text: string; collapsed?: boolean; ai?: boolean; pageNote?: boolean })
+  | (MarkBase & { kind: "image"; box: Rect; src: string; alt: string });
 
 export interface MarkBase {
   id: string;
@@ -36,6 +49,8 @@ export interface MarkBase {
   page: number;
   createdAt: number;
   updatedAt: number;
+  /** Ses kaydı sırasında eklendiyse: kayıt ve kaydın başından itibaren milisaniye. */
+  rec?: { id: string; t: number };
 }
 
 /** Tekrar modu kartı. Vurgu kartları kendiliğinden oluşur; AI kartları onaylanmadan desteye girmez. */
@@ -76,6 +91,29 @@ export interface FileRecord {
   aliases?: string[];
   /** File System Access API tutamacı (yalnızca Chromium). */
   handle?: FileSystemFileHandle;
+  /** Son açılanlarda düzen: klasör, etiketler, başa sabitleme, kapak rengi. */
+  folder?: string;
+  tags?: string[];
+  pinned?: boolean;
+  cover?: string;
+  /** Not kilidi: PIN'in PBKDF2 özeti. Veri şifrelenmez; paylaşılan bilgisayarda açılmayı engeller. */
+  lock?: { salt: string; hash: string };
+  /** Uygulamada oluşturulan boş not defteri. */
+  notebook?: { template: "blank" | "lined" | "grid" | "dots" };
+}
+
+/** Ders sırasında alınan ses kaydı; işaretler kaydın içindeki ana bağlanır. */
+export interface Recording {
+  id: string;
+  fileHash: string;
+  createdAt: number;
+  /** Milisaniye. */
+  duration: number;
+  mime: string;
+  blob: Blob;
+  title: string;
+  /** Yazıya dökülmüş metin: parçalar kaydın başından itibaren milisaniyeyle. */
+  transcript?: { t: number; text: string }[];
 }
 
 export type ThemeSetting = "light" | "dark" | "system";
@@ -132,9 +170,13 @@ export interface Settings {
   railOpen: boolean;
   panelOpen: boolean;
   ai: AiSettings;
-  pen: { color: PenColor; width: number };
+  pen: { color: InkColor; width: number; kind?: PenKind; custom?: string[] };
   /** İsteğe bağlı yerel hata günlüğü (hiçbir yere gönderilmez). */
   errorLog: boolean;
+  /** Son açılanlar görünümü. */
+  homeView?: "list" | "grid";
+  /** Ses kaydı sırasında tarayıcının konuşma tanımasıyla canlı yazıya dökme (Chrome'da ses Google'a gider). */
+  liveTranscribe?: boolean;
 }
 
 export const DEFAULT_NAMES: Record<Color, string> = {

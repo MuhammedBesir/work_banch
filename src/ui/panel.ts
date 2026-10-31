@@ -3,7 +3,9 @@ import { readingOrder } from "../geometry";
 import type { Color, Highlight, Mark } from "../types";
 import { COLORS } from "../types";
 import { h, kbd, marker } from "../util";
-import { stickyLabel } from "../write/layer";
+import { isCustom } from "../write/colors";
+import { colorClass, stickyLabel } from "../write/layer";
+import { richPlain } from "../write/rich";
 import { VirtualList, type VItem } from "./virtual";
 
 export type SortBy = "page" | "time" | "color";
@@ -108,6 +110,13 @@ export class Panel {
     }).observe(this.el);
   }
 
+  /** Tanınan el yazısı (sayfa → metin): panel aramasına ve satırına girer. */
+  private hw = new Map<number, string>();
+  setHandwriting(hw: Map<number, string>): void {
+    this.hw = hw;
+    this.render();
+  }
+
   setData(items: Highlight[], names: Record<Color, string>, marks: Mark[] = this.marks): void {
     this.items = items;
     this.names = names;
@@ -210,9 +219,9 @@ export class Panel {
     for (const m of this.marks) {
       if (m.kind === "text" || m.kind === "sticky") {
         if (this.kind === "draw" || !m.text.trim()) continue;
-        if (q && !fold(m.text).includes(q)) continue;
+        if (q && !fold(richPlain(m.text)).includes(q)) continue;
         rows.push({ type: "mark", marks: [m], page: m.page, y: m.box[1], x: m.box[0], created: m.createdAt, id: m.id });
-      } else if (this.kind !== "text" && !q) {
+      } else if (this.kind !== "text" && (!q || fold(this.hw.get(m.page) ?? "").includes(q))) {
         draw.set(m.page, [...(draw.get(m.page) ?? []), m]);
       }
     }
@@ -370,18 +379,23 @@ export class Panel {
       label = m.kind === "text" ? "Metin kutusu" : stickyLabel(m);
       badge = h("span", { class: `cm-kind${m.kind === "sticky" ? " cm-kind--sticky" : ""}`, text: m.kind === "text" ? "T" : m.ai ? "AI" : m.pageNote ? "S" : "N" });
       body = h("div", {},
-        h("div", { class: "cm-item__quote cm-item__quote--plain", text: m.text }),
+        h("div", { class: "cm-item__quote cm-item__quote--plain", text: richPlain(m.text) }),
         h("div", { class: "cm-item__meta" }, h("span", {}, h("span", { class: "cm-num", text: `s. ${num(m.page + 1)}` }), ` · ${label}`),
           h("button", { class: "cm-item__add", tabindex: "-1", onclick: (e: Event) => (e.stopPropagation(), this.actions.editMark(m)) }, "Düzenle")),
       );
     } else {
       const ink = r.marks.filter((x) => x.kind === "ink");
-      const shapes = r.marks.length - ink.length;
-      const color = (ink[0] ?? m) as Extract<Mark, { kind: "ink" | "shape" }>;
-      label = [ink.length ? `Kalem · ${num(ink.length)} çizgi` : "", shapes ? `${num(shapes)} şekil` : ""].filter(Boolean).join(", ");
-      badge = h("span", { class: `cm-penmark cm-penmark--${color.color}` });
+      const images = r.marks.filter((x) => x.kind === "image").length;
+      const shapes = r.marks.length - ink.length - images;
+      const color = r.marks.find((x) => x.kind === "ink" || x.kind === "shape") as Extract<Mark, { kind: "ink" | "shape" }> | undefined;
+      label = [ink.length ? `Kalem · ${num(ink.length)} çizgi` : "", shapes ? `${num(shapes)} şekil` : "", images ? `${num(images)} resim` : ""].filter(Boolean).join(", ");
+      badge = color ? h("span", { class: `cm-penmark cm-penmark--${colorClass(color.color)}` }) : h("span", { class: "cm-kind", text: "▣" });
+      if (color && isCustom(color.color)) badge.style.setProperty("--c", color.color);
+      const hw = this.hw.get(r.page)?.trim();
       body = h("div", {},
-        h("div", { class: "cm-item__quote cm-muted", text: "El yazısı ve çizimler aranamaz." }),
+        hw
+          ? h("div", { class: "cm-item__quote cm-item__quote--plain", text: `El yazısı: ${hw.length > 160 ? `${hw.slice(0, 160)}…` : hw}` })
+          : h("div", { class: "cm-item__quote cm-muted", text: ink.length ? "El yazısı henüz aranamaz: Dosya menüsü › El yazısını tanı." : "Çizim ve resimler aranamaz." }),
         h("div", { class: "cm-item__meta" }, h("span", {}, h("span", { class: "cm-num", text: `s. ${num(r.page + 1)}` }), ` · ${label}`)),
       );
     }

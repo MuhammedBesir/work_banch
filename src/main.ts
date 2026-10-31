@@ -28,6 +28,7 @@ import { AiPanel, type Scope } from "./ui/ai";
 import { askPassword, BIG_BYTES, BIG_PAGES, confirmBigFile, openAiSetup, openExport, openSettings, openShortcuts } from "./ui/dialogs";
 import { markBox } from "./write/geometry";
 import { renderMarks } from "./write/layer";
+import { toggleCheck } from "./write/rich";
 import { WriteMode } from "./write/writeMode";
 import { ReviewScreen } from "./review/review";
 import { freshSchedule, parseSuggestions } from "./review/srs";
@@ -481,6 +482,10 @@ function drawMarks(page: number): void {
       const m = marks.find((x) => x.id === id);
       if (m?.kind === "sticky") updateMark({ ...m, collapsed });
     },
+    onToggle: (id, line) => {
+      const m = marks.find((x) => x.id === id);
+      if (m && (m.kind === "text" || m.kind === "sticky")) updateMark({ ...m, text: toggleCheck(m.text, line), updatedAt: Date.now() });
+    },
   });
 }
 
@@ -752,7 +757,7 @@ async function openReader(file: OpenDoc): Promise<void> {
     update: updateMark,
     remove: removeMark,
     redraw: drawMarks,
-    pen: (color, width) => void changeSettings({ ...settings, pen: { color, width } }),
+    pen: (pen) => void changeSettings({ ...settings, pen }),
     announce,
   });
   write.el.hidden = true;

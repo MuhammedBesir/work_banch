@@ -1,8 +1,10 @@
 import {
   BlendMode, degrees, PDFArray, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFPage, PDFString, rgb, type RGB,
 } from "pdf-lib";
-import type { Color, Highlight, Mark, PenColor, Rect } from "../types";
-import { arrowHead, smoothPath, strokeOutline } from "../write/geometry";
+import type { Color, Highlight, Mark, Rect } from "../types";
+import { inkRgb } from "../write/colors";
+import { arrowHead, inkPressures, penStyle, smoothPath, straightPath, strokeOutline } from "../write/geometry";
+import { richPlain } from "../write/rich";
 import { stickyLabel } from "../write/layer";
 
 // Vurgulu / işaretli PDF: vurgular, notlar ve Yaz modu işaretleri PDF'e gömülür.
@@ -24,7 +26,6 @@ const HL: Record<Color, [number, number, number]> = {
   3: [0xa9, 0xcb, 0xec],
   4: [0xbd, 0xdb, 0xa6],
 };
-const PEN: Record<PenColor, [number, number, number]> = { black: [0x1f, 0x1d, 0x1a], blue: [0x1f, 0x4e, 0x79], red: [0xa3, 0x22, 0x1a] };
 const STICKY: [number, number, number] = [0xf3, 0xe7, 0xc4];
 const INK = "#1f1d1a";
 
@@ -106,9 +107,11 @@ export async function exportAnnotatedPdf(source: Uint8Array, highlights: Highlig
     if (m.kind === "ink" || m.kind === "shape") {
       if (o.mode === "annotations") addDrawingAnnot(doc, g, m);
       else drawFlat(g, m);
+    } else if (m.kind === "image") {
+      await drawImageMark(doc, g, m);
     } else if (m.text.trim()) {
       if (m.kind === "sticky" && (o.mode === "annotations" || m.collapsed)) {
-        addTextNote(doc, g, m.box, `${stickyLabel(m)}: ${m.text.trim()}`, STICKY);
+        addTextNote(doc, g, m.box, `${stickyLabel(m)}: ${richPlain(m.text)}`, STICKY);
       } else {
         await drawTextImage(doc, g, m);
       }
@@ -121,12 +124,20 @@ export async function exportAnnotatedPdf(source: Uint8Array, highlights: Highlig
 // ---------- Düzleştirilmiş çizim ----------
 
 function drawFlat(g: PageGeom, m: Extract<Mark, { kind: "ink" | "shape" }>): void {
-  const color = toRgb(PEN[m.color]);
+  const color = toRgb(inkRgb(m.color));
+  const pen = m.kind === "ink" ? m.pen ?? "pen" : "pen";
+  const style = penStyle(pen, m.width);
   const draw = (d: string, fill = false) =>
-    g.page.drawSvgPath(pathToPdf(g, d), { x: 0, y: 0, ...(fill ? { color, borderWidth: 0 } : { borderColor: color, borderWidth: m.width, borderLineCap: 1 }) });
+    g.page.drawSvgPath(pathToPdf(g, d), {
+      x: 0, y: 0,
+      ...(style.opacity < 1 ? { opacity: style.opacity, borderOpacity: style.opacity } : {}),
+      ...(pen === "marker" ? { blendMode: BlendMode.Multiply } : {}),
+      ...(fill ? { color, borderWidth: 0 } : { borderColor: color, borderWidth: style.width, borderLineCap: pen === "marker" ? 2 : 1 }),
+    });
   if (m.kind === "ink") {
-    if (m.pressures?.length === m.points.length && m.points.length > 1) draw(strokeOutline(m.points, m.pressures, m.width, g.vw, g.vh), true);
-    else draw(smoothPath(m.points));
+    const pressures = inkPressures(m, g.vw, g.vh);
+    if (pressures && m.points.length > 1) draw(strokeOutline(m.points, pressures, style.width, g.vw, g.vh), true);
+    else draw(m.straight ? straightPath(m.points) : smoothPath(m.points));
     return;
   }
   const [x0, y0] = m.from;
@@ -171,7 +182,7 @@ async function drawTextImage(doc: PDFDocument, g: PageGeom, m: Extract<Mark, { k
   const maxW = (wPt - pad * 2) * S;
   const lines: string[] = [];
   if (sticky) lines.push(`${stickyLabel(m as Extract<Mark, { kind: "sticky" }>)} · s. ${m.page + 1}`);
-  for (const para of m.text.split(/\n/)) {
+  for (const para of richPlain(m.text).split(/\n/)) {
     let cur = "";
     for (const word of para.split(/\s+/)) {
       const next = cur ? `${cur} ${word}` : word;
@@ -193,7 +204,7 @@ async function drawTextImage(doc: PDFDocument, g: PageGeom, m: Extract<Mark, { k
   lines.forEach((l, i) => {
     const header = sticky && i === 0;
     ctx.font = header ? `500 ${11 * S}px "IBM Plex Sans", system-ui, sans-serif` : font;
-    ctx.fillStyle = header ? "#57524a" : sticky ? INK : css(PEN[(m as Extract<Mark, { kind: "text" }>).color]);
+    ctx.fillStyle = header ? "#57524a" : sticky ? INK : css(inkRgb((m as Extract<Mark, { kind: "text" }>).color));
     ctx.fillText(l, pad * S, (pad + i * line + (line - size) / 2) * S);
   });
   const png = await doc.embedPng(await new Promise<Uint8Array>((resolve) =>
@@ -205,6 +216,23 @@ async function drawTextImage(doc: PDFDocument, g: PageGeom, m: Extract<Mark, { k
   else {
     const [ax, ay] = viewToPdf(g, m.box[0], m.box[1] + hPt / g.vh);
     g.page.drawImage(png, { x: ax, y: ay, width: wPt, height: hPt, rotate: degrees(rot) });
+  }
+}
+
+/** Sayfaya eklenen resim (JPEG ya da PNG veri adresi). */
+async function drawImageMark(doc: PDFDocument, g: PageGeom, m: Extract<Mark, { kind: "image" }>): Promise<void> {
+  const [head, b64] = m.src.split(",");
+  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const img = head.includes("png") ? await doc.embedPng(bytes) : await doc.embedJpg(bytes);
+  const [bx, by, bw, bh] = m.box;
+  const wPt = bw * g.vw;
+  const hPt = bh * g.vh;
+  if (g.rotation === 0) {
+    const [x0, y0] = rectToPdf(g, m.box);
+    g.page.drawImage(img, { x: x0, y: y0, width: wPt, height: hPt });
+  } else {
+    const [ax, ay] = viewToPdf(g, bx, by + bh);
+    g.page.drawImage(img, { x: ax, y: ay, width: wPt, height: hPt, rotate: degrees(g.rotation) });
   }
 }
 
@@ -243,7 +271,7 @@ function addDrawingAnnot(doc: PDFDocument, g: PageGeom, m: Extract<Mark, { kind:
   const pdf = pts.map(([x, y]) => viewToPdf(g, x, y));
   const pad = m.width + 2;
   const rect = [Math.min(...pdf.map((p) => p[0])) - pad, Math.min(...pdf.map((p) => p[1])) - pad, Math.max(...pdf.map((p) => p[0])) + pad, Math.max(...pdf.map((p) => p[1])) + pad];
-  const base = { Type: "Annot", Rect: rect, C: toUnit(PEN[m.color]), BS: { W: m.width }, T: PDFHexString.fromText("Çalışma Masası"), M: nowDate(), F: 4 };
+  const base = { Type: "Annot", Rect: rect, C: toUnit(inkRgb(m.color)), BS: { W: m.width }, T: PDFHexString.fromText("Çalışma Masası"), M: nowDate(), F: 4 };
   if (m.kind === "ink") {
     addAnnot(doc, g.page, { ...base, Subtype: "Ink", InkList: [pdf.flat()] });
   } else if (m.shape === "arrow") {

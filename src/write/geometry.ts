@@ -1,5 +1,5 @@
 import { rotateRect } from "../geometry";
-import type { Mark, Rect } from "../types";
+import type { Mark, PenKind, Rect } from "../types";
 
 type Pt = [number, number];
 
@@ -99,7 +99,7 @@ export function segDistSq([px, py]: Pt, [ax, ay]: Pt, [bx, by]: Pt): number {
 
 /** İşaretin sayfadaki kutusu (0–1). */
 export function markBox(m: Mark): Rect {
-  if (m.kind === "text" || m.kind === "sticky") return m.box;
+  if (m.kind === "text" || m.kind === "sticky" || m.kind === "image") return m.box;
   const pts = m.kind === "ink" ? m.points : [m.from, m.to];
   const xs = pts.map((p) => p[0]);
   const ys = pts.map((p) => p[1]);
@@ -171,4 +171,223 @@ export function arrowHead(from: Pt, to: Pt, aspect: number, size = 0.018): [Pt, 
   const ang = Math.atan2(dy, dx);
   const wing = (a: number): Pt => [to[0] - size * Math.cos(a), to[1] - (size * Math.sin(a)) / aspect];
   return [wing(ang - 0.45), wing(ang + 0.45)];
+}
+
+// ---------- Kalem türleri ----------
+
+/** Kalem türünün çizgi kalınlığı (ölçek 1, px) ve saydamlığı. */
+export function penStyle(pen: PenKind, width: number): { width: number; opacity: number } {
+  switch (pen) {
+    case "pencil": return { width: Math.max(0.8, width * 0.8), opacity: 0.78 };
+    case "marker": return { width: Math.max(10, width * 6), opacity: 0.38 };
+    case "fountain": return { width: width * 1.6, opacity: 1 };
+    default: return { width, opacity: 1 };
+  }
+}
+
+/**
+ * Çizgi boyunca kalınlık: dolma kalemde 45°'lik uç yönden gelir (yatay ince, dikey kalın değil, çapraz fark),
+ * diğerlerinde kalem basıncı (varsa). `null`: sabit kalınlık.
+ */
+export function inkPressures(m: Extract<Mark, { kind: "ink" }>, w: number, h: number): number[] | null {
+  if (m.pen === "marker" || m.straight) return null;
+  if (m.pen === "fountain" && m.points.length > 1) {
+    return m.points.map((_, i) => {
+      const a = m.points[Math.max(0, i - 1)];
+      const b = m.points[Math.min(m.points.length - 1, i + 1)];
+      const ang = Math.atan2((b[1] - a[1]) * h, (b[0] - a[0]) * w);
+      return +(0.08 + 0.75 * Math.abs(Math.sin(ang - Math.PI / 4))).toFixed(2);
+    });
+  }
+  return m.pressures?.length === m.points.length && m.points.length > 1 ? m.pressures : null;
+}
+
+/** Şekil tanımadan gelen köşeli çizgi. */
+export function straightPath(points: Pt[]): string {
+  const f = (n: number) => +n.toFixed(5);
+  return `M${points.map(([x, y]) => `${f(x)} ${f(y)}`).join(" L")}`;
+}
+
+// ---------- Kısmi silgi ----------
+
+/** Noktaları en fazla `stepPx` aralıkla sıklaştır (silgi seyrek noktalar arasından da kesebilsin). */
+export function densify(points: Pt[], pressures: number[] | undefined, stepPx: number, w: number, h: number): { points: Pt[]; pressures?: number[] } {
+  const out: Pt[] = [];
+  const pr: number[] = [];
+  for (let i = 0; i < points.length; i++) {
+    if (i > 0) {
+      const [ax, ay] = points[i - 1];
+      const [bx, by] = points[i];
+      const n = Math.floor(Math.hypot((bx - ax) * w, (by - ay) * h) / stepPx);
+      for (let k = 1; k < n; k++) {
+        const t = k / n;
+        out.push([ax + (bx - ax) * t, ay + (by - ay) * t]);
+        if (pressures) pr.push(pressures[i - 1] + (pressures[i] - pressures[i - 1]) * t);
+      }
+    }
+    out.push(points[i]);
+    if (pressures) pr.push(pressures[i]);
+  }
+  return pressures ? { points: out, pressures: pr } : { points: out };
+}
+
+/**
+ * Silginin değdiği kısmı çizgiden çıkar. Değmediyse `null`; değdiyse kalan parçalar
+ * (her biri en az iki nokta; hiç kalmadıysa boş dizi).
+ */
+export function eraseInk(m: Extract<Mark, { kind: "ink" }>, x: number, y: number, radiusPx: number, w: number, h: number): { points: Pt[]; pressures?: number[] }[] | null {
+  const dense = densify(m.points, m.pressures?.length === m.points.length ? m.pressures : undefined, Math.max(1, radiusPx / 2), w, h);
+  const r2 = radiusPx * radiusPx;
+  const inside = dense.points.map(([px, py]) => ((px - x) * w) ** 2 + ((py - y) * h) ** 2 <= r2);
+  if (!inside.some(Boolean)) return null;
+  const pieces: { points: Pt[]; pressures?: number[] }[] = [];
+  let cur: number[] = [];
+  const flush = () => {
+    if (cur.length > 1) {
+      pieces.push({ points: cur.map((i) => dense.points[i]), ...(dense.pressures ? { pressures: cur.map((i) => +dense.pressures![i].toFixed(2)) } : {}) });
+    }
+    cur = [];
+  };
+  inside.forEach((hit, i) => (hit ? flush() : cur.push(i)));
+  flush();
+  return pieces;
+}
+
+// ---------- Kement ----------
+
+export function pointInPolygon([x, y]: Pt, poly: Pt[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i];
+    const [xj, yj] = poly[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/** Kementin içinde mi: çizgilerde noktaların yarısından fazlası, diğerlerinde kutunun ortası. */
+export function inLasso(m: Mark, poly: Pt[]): boolean {
+  if (m.kind === "ink") return m.points.filter((p) => pointInPolygon(p, poly)).length > m.points.length / 2;
+  const [x, y, w, h] = markBox(m);
+  return pointInPolygon([x + w / 2, y + h / 2], poly);
+}
+
+/** Birden çok işaretin ortak kutusu. */
+export function unionBox(marks: Mark[]): Rect | null {
+  if (!marks.length) return null;
+  const boxes = marks.map(markBox);
+  const x0 = Math.min(...boxes.map((b) => b[0]));
+  const y0 = Math.min(...boxes.map((b) => b[1]));
+  const x1 = Math.max(...boxes.map((b) => b[0] + b[2]));
+  const y1 = Math.max(...boxes.map((b) => b[1] + b[3]));
+  return [x0, y0, x1 - x0, y1 - y0];
+}
+
+/** `(ox, oy)` noktasına göre ölçekle (seçim kutusunun köşe tutamacı). */
+export function scaleMark<M extends Mark>(m: M, ox: number, oy: number, sx: number, sy: number): M {
+  const sp = ([x, y]: Pt): Pt => [ox + (x - ox) * sx, oy + (y - oy) * sy];
+  if (m.kind === "ink") return { ...m, points: m.points.map(sp), width: m.width } as M;
+  if (m.kind === "shape") return { ...m, from: sp(m.from), to: sp(m.to) } as M;
+  const [x, y, w, h] = (m as Extract<Mark, { box: Rect }>).box;
+  const [nx, ny] = sp([x, y]);
+  if (m.kind === "sticky") return { ...m, box: [nx, ny, w, h] as Rect };
+  if (m.kind === "text") return { ...m, box: [nx, ny, w * sx, h * sy] as Rect, size: Math.max(6, Math.round((m.size ?? 14) * Math.sqrt(sx * sy))) } as M;
+  return { ...m, box: [nx, ny, w * sx, h * sy] as Rect };
+}
+
+// ---------- Şekil tanıma ----------
+
+export type Recognized =
+  | { type: "line"; pts: [Pt, Pt] }
+  | { type: "poly"; pts: Pt[] }
+  | { type: "rect" | "ellipse"; from: Pt; to: Pt };
+
+/**
+ * Elle çizilen şekli tanı (Samsung Notes'taki "çiz ve bekle"): düz çizgi, üçgen, dörtgen, dikdörtgen, elips.
+ * Noktalar 0–1, `w`, `h` sayfanın piksel boyutu. Tanınmazsa `null`.
+ */
+export function recognizeShape(points: Pt[], w: number, h: number): Recognized | null {
+  if (points.length < 2) return null;
+  const px = points.map(([x, y]) => [x * w, y * h] as Pt);
+  let len = 0;
+  for (let i = 1; i < px.length; i++) len += Math.hypot(px[i][0] - px[i - 1][0], px[i][1] - px[i - 1][1]);
+  if (len < 24) return null;
+  const back = (p: Pt): Pt => [p[0] / w, p[1] / h];
+  const first = px[0];
+  const last = px[px.length - 1];
+  const chord = Math.hypot(last[0] - first[0], last[1] - first[1]);
+  // Düz çizgi: uçlar arası uzaklık yol uzunluğuna yakın ve sapma küçük.
+  if (chord / len > 0.9) {
+    const dev = Math.max(...px.map((p) => Math.sqrt(segDistSq(p, first, last))));
+    if (dev < Math.max(5, chord * 0.07)) return { type: "line", pts: [back(first), back(last)] };
+  }
+  const xs = px.map((p) => p[0]);
+  const ys = px.map((p) => p[1]);
+  const bx0 = Math.min(...xs), bx1 = Math.max(...xs), by0 = Math.min(...ys), by1 = Math.max(...ys);
+  const diag = Math.hypot(bx1 - bx0, by1 - by0);
+  // Kapalı değilse tanınmaz.
+  if (chord > Math.max(diag * 0.25, 18) || diag < 20) return null;
+  const closed = [...px, first];
+  const corners = simplifyIndices(closed, diag * 0.075).map((i) => closed[i]);
+  // Uç noktayı başlangıçla birleştir, birbirine çok yakın köşeleri at.
+  const verts: Pt[] = [];
+  for (const c of corners.slice(0, -1)) {
+    if (!verts.length || Math.hypot(c[0] - verts[verts.length - 1][0], c[1] - verts[verts.length - 1][1]) > diag * 0.12) verts.push(c);
+  }
+  if (verts.length > 2 && Math.hypot(verts[0][0] - verts[verts.length - 1][0], verts[0][1] - verts[verts.length - 1][1]) < diag * 0.12) verts.pop();
+  const rx = (bx1 - bx0) / 2 || 1;
+  const ry = (by1 - by0) / 2 || 1;
+  const cx = bx0 + rx;
+  const cy = by0 + ry;
+  const ellipseErr = px.reduce((s, [x, y]) => s + Math.abs(Math.hypot((x - cx) / rx, (y - cy) / ry) - 1), 0) / px.length;
+  const box = { from: back([bx0, by0]), to: back([bx1, by1]) };
+  if (verts.length === 3 && ellipseErr > 0.08) return { type: "poly", pts: [...verts, verts[0]].map(back) };
+  if (verts.length === 4 && ellipseErr > 0.06) {
+    const axis = verts.every((v, i) => {
+      const n = verts[(i + 1) % 4];
+      const ang = Math.abs(Math.atan2(n[1] - v[1], n[0] - v[0])) % (Math.PI / 2);
+      return Math.min(ang, Math.PI / 2 - ang) < 0.22;
+    });
+    return axis ? { type: "rect", ...box } : { type: "poly", pts: [...verts, verts[0]].map(back) };
+  }
+  if (ellipseErr < 0.16) return { type: "ellipse", ...box };
+  return null;
+}
+
+// ---------- El yazısını düzleştirme ----------
+
+/** Çizgilerin genel eğimi (radyan, piksel uzayında; en küçük kareler). */
+export function inkSlope(marks: Mark[], w: number, h: number): number {
+  const pts = marks.flatMap((m) => (m.kind === "ink" ? m.points : [])).map(([x, y]) => [x * w, y * h] as Pt);
+  if (pts.length < 2) return 0;
+  const mx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+  const my = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+  let num = 0;
+  let den = 0;
+  for (const [x, y] of pts) {
+    num += (x - mx) * (y - my);
+    den += (x - mx) ** 2;
+  }
+  return den ? Math.atan(num / den) : 0;
+}
+
+/** İşareti `(cx, cy)` (0–1) etrafında döndür; kutulu işaretlerin yalnızca yeri döner. */
+export function rotateAround<M extends Mark>(m: M, cx: number, cy: number, ang: number, w: number, h: number): M {
+  const cos = Math.cos(ang);
+  const sin = Math.sin(ang);
+  const rp = ([x, y]: Pt): Pt => {
+    const dx = (x - cx) * w;
+    const dy = (y - cy) * h;
+    return [cx + (dx * cos - dy * sin) / w, cy + (dx * sin + dy * cos) / h];
+  };
+  if (m.kind === "ink") return { ...m, points: m.points.map(rp) };
+  if (m.kind === "shape") {
+    const c = rp([(m.from[0] + m.to[0]) / 2, (m.from[1] + m.to[1]) / 2]);
+    const dx = c[0] - (m.from[0] + m.to[0]) / 2;
+    const dy = c[1] - (m.from[1] + m.to[1]) / 2;
+    return moveMark(m, dx, dy);
+  }
+  const [x, y, bw, bh] = markBox(m);
+  const c = rp([x + bw / 2, y + bh / 2]);
+  return moveMark(m, c[0] - (x + bw / 2), c[1] - (y + bh / 2));
 }
