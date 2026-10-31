@@ -152,6 +152,7 @@ export class Viewer {
     this.destroyed = true;
     this.resizeObs.disconnect();
     clearTimeout(this.renderTimer);
+    clearTimeout(this.neighborTimer);
     this.stage.removeEventListener("scroll", this.onScroll);
     this.stage.removeEventListener("wheel", this.onWheel);
     this.stage.removeEventListener("mouseup", this.onMouseUp);
@@ -311,8 +312,15 @@ export class Viewer {
       this.events.pageChange(i);
     }
     this.events.scroll();
-    this.scheduleRender(60);
+    // Hızlı kaydırmada (bir olayda yarım ekrandan fazla) üzerinden geçilen sayfalar çizilmez:
+    // kaydırma yavaşlayınca çizilir.
+    const y = this.stage.scrollTop;
+    const fast = Math.abs(y - this.lastScrollY) > this.stage.clientHeight * 0.5;
+    this.lastScrollY = y;
+    this.scheduleRender(fast ? 160 : 60);
   };
+  private lastScrollY = 0;
+  private neighborTimer = 0;
 
   goTo(i: number, behavior: ScrollBehavior = "instant"): void {
     i = clamp(i, 0, this.pages.length - 1);
@@ -388,13 +396,20 @@ export class Viewer {
     const last = this.pageAt(this.stage.scrollTop + this.stage.clientHeight);
     const from = Math.max(0, first - RENDER_AROUND);
     const to = Math.min(this.pages.length - 1, last + RENDER_AROUND);
+    const stale = (p: PageView) => Math.abs(p.renderedScale - this.scale) > 0.001;
+    // Önce ekrandaki sayfalar; komşular (±2) ancak kaydırma bir süre durunca.
+    clearTimeout(this.neighborTimer);
     for (const p of this.pages) {
-      if (p.index >= from && p.index <= to) {
-        if (Math.abs(p.renderedScale - this.scale) > 0.001) void this.renderPage(p);
+      if (p.index >= first && p.index <= last) {
+        if (stale(p)) void this.renderPage(p);
       } else if (p.index < first - KEEP_AROUND || p.index > last + KEEP_AROUND) {
         this.release(p);
       }
     }
+    this.neighborTimer = window.setTimeout(() => {
+      if (this.destroyed) return;
+      for (let i = from; i <= to; i++) if ((i < first || i > last) && stale(this.pages[i])) void this.renderPage(this.pages[i]);
+    }, 220);
   }
 
   private release(p: PageView): void {

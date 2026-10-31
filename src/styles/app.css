@@ -634,3 +634,10 @@ label.cm-field { cursor: pointer; }
 .cm-math--block { margin: 8px 0; overflow-x: auto; overflow-y: hidden; text-align: center; }
 .cm-math.is-raw { font: 12px/18px var(--font-mono); color: var(--ink-muted); }
 .cm-ai__a .cm-math--block { padding: 6px 0; }
+
+/* ---------- Büyük belgede yerleşim maliyeti ---------- */
+/* Sayfanın içi dışını etkilemez (boyutu satır içinde verilir): yerleşim sayfa sayfa hesaplanır.
+   Boya kapsaması yok: kenar işaretleri sayfanın dışına taşar. */
+.cm-page { contain: layout style; }
+/* Ekran dışındaki küçük sayfalar çizilmez ve yerleşime katılmaz; boyutları hatırlanır. */
+.cm-thumb { content-visibility: auto; contain-intrinsic-size: auto 72px auto 112px; }

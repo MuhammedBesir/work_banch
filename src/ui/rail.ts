@@ -103,7 +103,17 @@ export class Rail {
     else this.markOutlineCurrent();
   }
 
+  /**
+   * Geçerli küçük sayfayı görünür tut. Kaydırırken sayfa sık değişir: konum okuması (zorunlu yerleşim
+   * hesabı) bir sonraki kareye ertelenir ve birleştirilir.
+   */
+  private scrollFrame = 0;
   private scrollToCurrent(): void {
+    cancelAnimationFrame(this.scrollFrame);
+    this.scrollFrame = requestAnimationFrame(() => this.scrollNow());
+  }
+
+  private scrollNow(): void {
     const b = this.buttons[this.current];
     if (!b || this.thumbs.hidden) return;
     const top = b.offsetTop - this.thumbs.offsetTop;

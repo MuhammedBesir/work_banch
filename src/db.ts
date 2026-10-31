@@ -217,6 +217,20 @@ export async function moveFileData(from: string, to: string): Promise<void> {
   }
 }
 
+/** Dosya başına meta kayıtları (ör. `quiz:`, `hw:`): yedek için anahtar → değer. */
+export async function metaWithPrefix(prefixes: string[]): Promise<Record<string, unknown>> {
+  const s = await store("meta");
+  const keys = (await wrap(s.getAllKeys())) as IDBValidKey[];
+  const out: Record<string, unknown> = {};
+  for (const k of keys) {
+    if (typeof k === "string" && prefixes.some((p) => k.startsWith(p))) {
+      const v = await getMeta(k);
+      if (v !== undefined && v !== null) out[k] = v;
+    }
+  }
+  return out;
+}
+
 export async function saveSettings(s: Settings): Promise<void> {
   await wrap((await store("meta", "readwrite")).put(s, "settings"));
 }

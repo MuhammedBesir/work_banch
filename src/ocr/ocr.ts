@@ -22,7 +22,19 @@ let starting: Promise<TWorker> | null = null;
 
 const abs = (p: string) => new URL(p, document.baseURI).href;
 
+/** Tanıma motoru bellekte ~100 MB+ tutar: 90 sn kullanılmazsa kapatılır, gerekince yeniden açılır. */
+const IDLE_MS = 90_000;
+let idleTimer = 0;
+let busy = 0;
+function armIdle(): void {
+  clearTimeout(idleTimer);
+  idleTimer = window.setTimeout(() => {
+    if (busy === 0) void stopOcr();
+  }, IDLE_MS);
+}
+
 async function getWorker(onProgress?: (status: string, ratio: number) => void): Promise<TWorker> {
+  clearTimeout(idleTimer);
   if (worker) return worker;
   starting ??= (async () => {
     const T = await import("tesseract.js");
@@ -63,7 +75,14 @@ export async function recognizeCanvas(canvas: HTMLCanvasElement, onProgress?: (s
 }
 
 async function recognizeWith(w: TWorker, canvas: HTMLCanvasElement, minConfidence = 20): Promise<OcrPage> {
-  const { data } = await w.recognize(canvas, {}, { blocks: true, text: true });
+  busy++;
+  let data: Awaited<ReturnType<TWorker["recognize"]>>["data"];
+  try {
+    ({ data } = await w.recognize(canvas, {}, { blocks: true, text: true }));
+  } finally {
+    busy--;
+    armIdle();
+  }
   const W = canvas.width;
   const H = canvas.height;
   const lines: OcrWord[][] = [];
@@ -81,6 +100,7 @@ async function recognizeWith(w: TWorker, canvas: HTMLCanvasElement, minConfidenc
 }
 
 export async function stopOcr(): Promise<void> {
+  clearTimeout(idleTimer);
   const w = worker;
   worker = null;
   await w?.terminate();

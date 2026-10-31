@@ -2,7 +2,11 @@ import * as db from "./db";
 import type { Card, FileRecord, Highlight, Mark, Settings } from "./types";
 
 // JSON yedek: vurgular, notlar, Yaz modu işaretleri, yer imleri, kaldığın yer ve ayarlar.
-// Dosyaların kendisi ve AI API anahtarı yedeğe girmez.
+// Quizler, tanınmış el yazısı ve OCR metni de girer (yeniden üretmesi pahalı). Dosyaların kendisi,
+// ses kayıtları ve AI API anahtarı yedeğe girmez.
+
+/** Yedeğe giren dosya başına meta kayıtları. */
+const META_PREFIXES = ["quiz:", "hw:", "ocr:", "ai:"];
 
 export interface Backup {
   app: "calisma-masasi";
@@ -13,10 +17,12 @@ export interface Backup {
   highlights: Highlight[];
   marks?: Mark[];
   cards?: Card[];
+  /** Dosya başına meta: quizler, el yazısı, OCR metni, AI sohbet geçmişi. */
+  meta?: Record<string, unknown>;
 }
 
 export async function createBackup(): Promise<Backup> {
-  const [settings, files, highlights, marks, cards] = await Promise.all([db.loadSettings(), db.allFiles(), db.allHighlights(), db.allMarks(), db.allCards()]);
+  const [settings, files, highlights, marks, cards, meta] = await Promise.all([db.loadSettings(), db.allFiles(), db.allHighlights(), db.allMarks(), db.allCards(), db.metaWithPrefix(META_PREFIXES)]);
   return {
     app: "calisma-masasi",
     version: 1,
@@ -26,6 +32,7 @@ export async function createBackup(): Promise<Backup> {
     highlights,
     marks,
     cards,
+    meta,
   };
 }
 
@@ -52,6 +59,10 @@ export async function restoreBackup(b: Backup): Promise<{ highlights: number; fi
   await db.putHighlights(b.highlights);
   await db.putMarks(b.marks ?? []);
   await db.putCards(b.cards ?? []);
+  // Yalnızca bilinen dosya meta kayıtları geri yazılır (ayarlar ve anahtarlar değil).
+  for (const [k, v] of Object.entries(b.meta ?? {})) {
+    if (META_PREFIXES.some((p) => k.startsWith(p))) await db.putMeta(k, v);
+  }
   if (b.settings) {
     // Yedekte anahtar yok: bu tarayıcıdaki anahtar korunur.
     const current = await db.loadSettings();

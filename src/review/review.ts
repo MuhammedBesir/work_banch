@@ -53,7 +53,24 @@ export class ReviewScreen {
     this.main = h("main", { class: "cm-review", "aria-live": "polite" });
     this.el = h("div", { class: "cm-review-screen" }, bar, this.main);
     this.el.addEventListener("keydown", this.onKey);
+    // Odak henüz ekrana geçmeden basılan tuşlar da (Firefox, Safari) ekrana gelsin.
+    document.addEventListener("keydown", this.onDocKey, true);
     this.build();
+  }
+
+  private onDocKey = (e: KeyboardEvent) => {
+    if (!this.el.isConnected) {
+      document.removeEventListener("keydown", this.onDocKey, true);
+      return;
+    }
+    const t = e.target as HTMLElement;
+    if (this.el.contains(t) || t.closest?.("input, textarea, [contenteditable], .cm-dialog")) return;
+    this.onKey(e);
+  };
+
+  destroy(): void {
+    document.removeEventListener("keydown", this.onDocKey, true);
+    this.el.remove();
   }
 
   focus(): void {

@@ -811,7 +811,7 @@ function closeReader(): void {
     ocrRun.stop = true;
     void stopOcr();
   }
-  review?.el.remove();
+  review?.destroy();
   review = null;
   reader.editor?.destroy();
   reader.write.disable();
@@ -2388,7 +2388,7 @@ function openReview(): void {
 
 function closeReview(): void {
   if (!review || !reader) return;
-  review.el.remove();
+  review.destroy();
   review = null;
   reader.root.classList.remove("is-review");
   reader.body.hidden = false;
