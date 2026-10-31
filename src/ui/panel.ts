@@ -7,6 +7,7 @@ import { isCustom } from "../write/colors";
 import { colorClass, stickyLabel } from "../write/layer";
 import { richPlain } from "../write/rich";
 import { VirtualList, type VItem } from "./virtual";
+import { clock } from "../audio/recorder";
 
 export type SortBy = "page" | "time" | "color";
 type Kind = "all" | "hl" | "text" | "draw";
@@ -24,6 +25,8 @@ export interface PanelActions {
   saveNote(id: string, note: string): void;
   remove(id: string): void;
   resize(width: number): void;
+  /** Ses kaydında bu ana git (işaret kayıt sırasında eklendiyse). */
+  playRec?(rec: { id: string; t: number }): void;
 }
 
 /** Sağ vurgu paneli: arama, renge göre filtre, sayfaya göre gruplu liste, not alanı ve boş durumlar. */
@@ -381,6 +384,7 @@ export class Panel {
       body = h("div", {},
         h("div", { class: "cm-item__quote cm-item__quote--plain", text: richPlain(m.text) }),
         h("div", { class: "cm-item__meta" }, h("span", {}, h("span", { class: "cm-num", text: `s. ${num(m.page + 1)}` }), ` · ${label}`),
+          m.rec ? this.recButton(m.rec) : null,
           h("button", { class: "cm-item__add", tabindex: "-1", onclick: (e: Event) => (e.stopPropagation(), this.actions.editMark(m)) }, "Düzenle")),
       );
     } else {
@@ -412,6 +416,14 @@ export class Panel {
       this.actions.jumpMark(m);
     });
     return row;
+  }
+
+  /** Kayıt sırasında eklenen işaret: kaydın o anını çalar. */
+  private recButton(rec: { id: string; t: number }): HTMLElement {
+    return h("button", {
+      class: "cm-item__add cm-item__rec", tabindex: "-1", title: "Ses kaydında bu anı dinle",
+      onclick: (e: Event) => (e.stopPropagation(), this.actions.playRec?.(rec)),
+    }, `▶ ${clock(rec.t)}`);
   }
 
   private itemRow(it: Highlight): HTMLElement {
@@ -458,6 +470,7 @@ export class Panel {
     } else {
       if (it.note.trim()) body.append(h("div", { class: "cm-item__note", text: it.note }));
       const meta = h("div", { class: "cm-item__meta" }, h("span", {}, h("span", { class: "cm-num", text: pageLabel }), ` · ${name}`));
+      if (it.rec) meta.append(this.recButton(it.rec));
       meta.append(
         h("button", {
           class: "cm-item__add",

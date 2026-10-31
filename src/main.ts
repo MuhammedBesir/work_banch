@@ -17,13 +17,16 @@ import { readingOrder } from "./geometry";
 import { editMark, editRect } from "./editor/transform";
 import { recognizeCanvas, recognizePage, stopOcr, type OcrPage } from "./ocr/ocr";
 import { openHandwriting } from "./ui/handwriting";
+import { AudioBar } from "./audio/bar";
+import { canLiveTranscribe, canRecord, clock, Recorder } from "./audio/recorder";
+import { openTranscript } from "./audio/transcript";
 import { rasterInk } from "./write/raster";
 import { unionBox } from "./write/geometry";
 import { looksLikePdf, looksScanned, loadOutline, OpenError, openPdf, pageText, type OutlineItem } from "./pdf/load";
 import { Viewer, type SelectionPart } from "./pdf/viewer";
 import { PageEditor, type EditPage } from "./editor/pageEditor";
 import { chatMarkdown, type AiContext, type Cite, type SavedTurn } from "./ai/prompt";
-import type { AiSettings, Card, Color, FileRecord, Highlight, Mark, Rect, Settings } from "./types";
+import type { AiSettings, Card, Color, FileRecord, Highlight, Mark, Rect, Settings, Recording } from "./types";
 import { COLORS } from "./types";
 import { announce, download, h, isTyping, kbd, sha256, uid } from "./util";
 import { confirmDialog } from "./ui/dialog";
@@ -37,7 +40,7 @@ import { ReviewScreen } from "./review/review";
 import { freshSchedule, parseSuggestions } from "./review/srs";
 import { FloatBar } from "./ui/float";
 import { Home, type RecentRow } from "./ui/home";
-import { openMenu } from "./ui/menu";
+import { openMenu, type MenuItem } from "./ui/menu";
 import { Panel } from "./ui/panel";
 import { Rail } from "./ui/rail";
 import { Search } from "./ui/search";
@@ -88,6 +91,8 @@ interface Reader {
   rtabs: HTMLElement;
   outline: OutlineItem[];
   mode: Mode;
+  recorder: Recorder;
+  audio: AudioBar;
 }
 
 type Mode = "read" | "write" | "edit";
@@ -119,6 +124,9 @@ let ocrRun: { stop: boolean } | null = null;
 /** Tanınmış el yazısı (meta `hw:<hash>`): sayfa → kelimeler ve hangi çizimlerden tanındığı. */
 let hwPages = new Map<number, OcrPage & { sig: string }>();
 let hwRun: { stop: boolean } | null = null;
+/** Bu dosyanın ses kayıtları ve sürmekte olan kaydın kimliği. */
+let recordings: Recording[] = [];
+let recId: string | null = null;
 let rightTab: "marks" | "ai" = "marks";
 /** Son metin seçimi: AI'nın "Seçim" kapsamı için (Sor düğmesine basınca seçim kaybolsa da kalır). */
 let lastSelection: SelectionPart[] | null = null;
@@ -505,7 +513,14 @@ function refreshMarks(pages?: number[]): void {
   updatePanelCount();
 }
 
+/** Kayıt sürerken eklenen işaret kaydın o anına bağlanır. */
+function stamp(): { rec: { id: string; t: number } } | Record<string, never> {
+  return reader && recId && reader.recorder.state === "recording" ? { rec: { id: recId, t: Math.round(reader.recorder.elapsed()) } } : {};
+}
+
 function addMark(m: Mark): void {
+  // Yalnızca yeni işaret (geri alınıp yeniden eklenen eski işaret değil).
+  if (!m.rec && Date.now() - m.createdAt < 3000) Object.assign(m, stamp());
   marks = [...marks.filter((x) => x.id !== m.id), m];
   refreshMarks([m.page]);
   void db.putMark(m);
@@ -542,6 +557,8 @@ async function reloadHighlights(): Promise<void> {
 
 function closeReader(): void {
   if (!reader) return;
+  if (reader.recorder.state !== "idle") void finishRecording(reader);
+  reader.audio.close();
   if (ocrRun) {
     ocrRun.stop = true;
     void stopOcr();
@@ -572,6 +589,7 @@ async function openReader(file: OpenDoc): Promise<void> {
   cards = await db.cardsFor(file.rec.hash);
   const savedOcr = (await db.getMeta<Record<string, OcrPage>>(`ocr:${file.rec.hash}`)) ?? {};
   ocrPages = new Map(Object.entries(savedOcr).map(([k, v]) => [Number(k), v]));
+  recordings = await db.recordingsFor(file.rec.hash);
   const savedHw = (await db.getMeta<Record<string, OcrPage & { sig: string }>>(`hw:${file.rec.hash}`)) ?? {};
   hwPages = new Map(Object.entries(savedHw).map(([k, v]) => [Number(k), v]));
   indexHighlights();
@@ -645,6 +663,8 @@ async function openReader(file: OpenDoc): Promise<void> {
     "sep",
     { label: "Tekrar et", shortcut: "Alt T", run: () => openReview() },
   ], "right"));
+  const recBtn = ghost("Kayıt", { title: "Ses kaydı (Alt R)", "aria-haspopup": "menu" });
+  recBtn.addEventListener("click", () => recordMenu(recBtn));
   const aiBtn = ghost("AI", { title: "AI paneli (Ctrl J)", "aria-pressed": "false", onclick: () => toggleAi() });
   const sep = () => h("span", { class: "cm-bar__sep" });
 
@@ -672,6 +692,7 @@ async function openReader(file: OpenDoc): Promise<void> {
       ghost("Odak ", { class: "cm-btn cm-btn--ghost cm-btn--sm is-wide", onclick: () => setFocus(!focusMode) }, kbd("F")),
       exportBtn,
       sep(),
+      recBtn,
       panelBtn,
       aiBtn,
     ),
@@ -716,6 +737,7 @@ async function openReader(file: OpenDoc): Promise<void> {
     },
     saveNote: (id, note) => void saveNote(id, note),
     remove: (id) => removeHighlight(id),
+    playRec: (rec) => playRecording(rec.id, rec.t - 2000),
     jumpMark: (m) => {
       viewer.reveal(m.page, markBox(m));
       if (isNarrow()) togglePanel(false);
@@ -773,6 +795,17 @@ async function openReader(file: OpenDoc): Promise<void> {
   write.el.hidden = true;
   stageWrap.append(write.el);
 
+  const recorder: Recorder = new Recorder(() => {
+    audio.render();
+    recBtn.classList.toggle("is-rec", recorder.state !== "idle");
+  });
+  const audio: AudioBar = new AudioBar(recorder, {
+    stop: () => reader && void finishRecording(reader),
+    transcript: (rec) => transcriptDialog(rec),
+    time: (id, ms) => dimFuture(id, ms),
+  });
+  stageWrap.append(audio.el);
+
   const ai = new AiPanel({
     settings: () => settings.ai,
     context: (scope) => aiContext(scope),
@@ -811,7 +844,7 @@ async function openReader(file: OpenDoc): Promise<void> {
   reader = {
     file, root, body, band, stage, viewer, panel, rail, float, search, pageInput, zoomLabel,
     panelBtn, railBtn, themeBtn, modeSeg, pageFlag, editor: null,
-    write, ai, aiBtn, rtabs, outline: [], mode: "read",
+    write, ai, aiBtn, rtabs, outline: [], mode: "read", recorder, audio,
   };
   renderModeSeg("read");
   applySettings();
@@ -948,6 +981,132 @@ async function runOcr(scope: "page" | "all"): Promise<void> {
     r.file.rec.scannedDismissed = true;
     void db.putFile(r.file.rec);
   }
+}
+
+// ---------- Ses kaydı ----------
+
+function recordMenu(anchor: HTMLElement): void {
+  if (!reader) return;
+  const r = reader;
+  const items: (MenuItem | "sep")[] = [];
+  if (r.recorder.state !== "idle") {
+    items.push(
+      r.recorder.state === "recording" ? { label: "Duraklat", run: () => r.recorder.pause() } : { label: "Devam et", run: () => r.recorder.resume() },
+      { label: "Kaydı bitir", shortcut: "Alt R", run: () => void finishRecording(r) },
+    );
+  } else {
+    items.push({ label: "Kaydı başlat", shortcut: "Alt R", run: () => void startRecording() });
+    if (canLiveTranscribe()) {
+      items.push({ label: `Canlı yazıya dökme: ${settings.liveTranscribe ? "açık" : "kapalı"}`, hint: "Chrome'da ses Google'a gider", run: () => void changeSettings({ ...settings, liveTranscribe: !settings.liveTranscribe }) });
+    }
+  }
+  if (recordings.length) {
+    items.push("sep");
+    for (const rec of [...recordings].reverse()) {
+      items.push({ label: `▶ ${rec.title}`, hint: clock(rec.duration), run: () => playRecording(rec.id, 0) });
+    }
+    items.push("sep", { label: "Kayıtları yönet…", run: () => manageRecordings() });
+  }
+  openMenu(anchor, items, "right");
+}
+
+async function startRecording(): Promise<void> {
+  if (!reader || reader.recorder.state !== "idle") return;
+  if (!canRecord()) {
+    toast("Bu tarayıcı ses kaydını desteklemiyor.");
+    return;
+  }
+  reader.audio.close();
+  try {
+    await reader.recorder.start(!!settings.liveTranscribe && canLiveTranscribe());
+  } catch {
+    toast("Mikrofona erişilemedi. Tarayıcının adres çubuğundan mikrofon iznini kontrol et.");
+    return;
+  }
+  recId = uid();
+  announce("Ses kaydı başladı. Bu sırada eklediğin vurgu ve işaretler kaydın o anına bağlanır.");
+}
+
+async function finishRecording(r: Reader): Promise<void> {
+  const id = recId;
+  const out = await r.recorder.stop();
+  recId = null;
+  if (!out || !id) return;
+  if (out.duration < 1000) {
+    toast("Kayıt çok kısa; kaydedilmedi.");
+    return;
+  }
+  const rec: Recording = {
+    id, fileHash: r.file.rec.hash, createdAt: Date.now() - out.duration, duration: out.duration, mime: out.mime, blob: out.blob,
+    title: `Kayıt ${recordings.filter((x) => x.fileHash === r.file.rec.hash).length + 1} · ${new Date().toLocaleString("tr-TR", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })}`,
+    ...(out.transcript.length ? { transcript: out.transcript } : {}),
+  };
+  await db.putRecording(rec);
+  if (reader === r) recordings = [...recordings, rec];
+  toast(`Kayıt kaydedildi (${clock(out.duration)}). Kayıt sırasında eklediğin işaretlerden o ana gidebilirsin.`);
+}
+
+function playRecording(id: string, at: number): void {
+  const rec = recordings.find((x) => x.id === id);
+  if (!reader || !rec) {
+    toast("Bu işaretin bağlı olduğu kayıt bulunamadı (silinmiş olabilir).");
+    return;
+  }
+  if (reader.recorder.state !== "idle") return;
+  reader.audio.play(rec, Math.max(0, at));
+}
+
+/** Çalarken o ana kadar eklenmemiş işaretler soluk (kayıttaki sıra görülür). */
+let dimFrame = 0;
+function dimFuture(id: string | null, ms: number): void {
+  cancelAnimationFrame(dimFrame);
+  dimFrame = requestAnimationFrame(() => {
+    if (!reader) return;
+    const root = reader.viewer.root;
+    root.classList.toggle("is-replay", !!id);
+    const future = new Set<string>();
+    if (id) for (const x of [...highlights, ...marks]) if (x.rec?.id === id && x.rec.t > ms) future.add(x.id);
+    root.querySelectorAll<Element>("[data-id]").forEach((el) => el.classList.toggle("is-future", future.has((el as HTMLElement).dataset.id!)));
+  });
+}
+
+function transcriptDialog(rec: Recording): void {
+  openTranscript({
+    rec,
+    ai: settings.ai,
+    seek: (ms) => playRecording(rec.id, ms),
+    save: (next) => {
+      recordings = recordings.map((x) => (x.id === next.id ? next : x));
+      void db.putRecording(next);
+    },
+    addNote: (text) => addAiNote(reader?.viewer.current ?? 0, text),
+    download: (name, text) => download(name, text, "text/markdown;charset=utf-8"),
+    copy: (t) => void navigator.clipboard?.writeText(t).then(() => toast("Kopyalandı"), () => toast("Panoya kopyalanamadı.")),
+    openAiSettings: aiSetup,
+  });
+}
+
+function manageRecordings(): void {
+  const d = openDialog({ title: "Ses kayıtları", width: 560 });
+  const render = () => {
+    d.body.replaceChildren(...(recordings.length ? recordings.map((rec) =>
+      h("div", { class: "cm-reclist__row" },
+        h("div", {}, h("div", { text: rec.title }), h("div", { class: "cm-muted cm-num", style: "font-size:12px", text: `${clock(rec.duration)} · ${(rec.blob.size / 1048576).toFixed(1)} MB${rec.transcript?.length ? " · metni var" : ""}` })),
+        h("div", { style: "display:flex;gap:4px" },
+          h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm", onclick: () => (d.close(), playRecording(rec.id, 0)) }, "Çal"),
+          h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm", onclick: () => (d.close(), transcriptDialog(rec)) }, "Metin"),
+          h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm", onclick: () => download(`${rec.title}.${rec.mime.includes("mp4") ? "m4a" : "webm"}`, rec.blob, rec.mime) }, "İndir"),
+          h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm", onclick: async () => {
+            if (!(await confirmDialog({ title: "Kayıt silinsin mi?", text: `${rec.title} bu cihazdan silinir. İşaretler kalır, yalnızca kayda bağlantıları çalışmaz.`, ok: "Sil", danger: true }))) return;
+            await db.deleteRecording(rec.id);
+            recordings = recordings.filter((x) => x.id !== rec.id);
+            if (reader?.audio.current?.id === rec.id) reader.audio.close();
+            render();
+          } }, "Sil"),
+        ))) : [h("p", { class: "cm-muted", style: "margin:0", text: "Kayıt yok." })]),
+      h("p", { class: "cm-muted", style: "margin:8px 0 0;font-size:12px", text: "Kayıtlar yalnızca bu tarayıcıda saklanır ve JSON yedeğe girmez; saklamak istediklerini indir." }));
+  };
+  render();
 }
 
 // ---------- El yazısı ----------
@@ -1326,6 +1485,7 @@ function createFromPending(color: Color): Highlight[] {
   const created = pending.map<Highlight>((p) => ({
     id: uid(), fileHash: reader!.file.rec.hash, page: p.page, color, rects: p.rects, text: p.text, note: "", createdAt: now, updatedAt: now,
     ...(group ? { group } : {}),
+    ...stamp(),
   }));
   highlights.push(...created);
   pending = null;
@@ -1683,6 +1843,12 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   if (review) return; // Tekrar modu kendi kısayollarını işler
+  if (e.altKey && !ctrl && e.code === "KeyR") {
+    e.preventDefault();
+    if (r.recorder.state === "idle") void startRecording();
+    else void finishRecording(r);
+    return;
+  }
   if (e.altKey && !ctrl && e.code === "KeyT") {
     e.preventDefault();
     openReview();

@@ -1,10 +1,10 @@
-import type { Card, FileRecord, Highlight, Mark, Settings } from "./types";
+import type { Card, FileRecord, Highlight, Mark, Recording, Settings } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
 
 // Tüm veri bu tarayıcıda, IndexedDB'de yaşar. Hiçbir şey ağa gitmez.
 
 const DB_NAME = "calisma-masasi";
-const VERSION = 3;
+const VERSION = 4;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -26,6 +26,10 @@ function open(): Promise<IDBDatabase> {
       if (e.oldVersion < 3) {
         // Tekrar modu kartları ve plan
         db.createObjectStore("cards", { keyPath: "id" }).createIndex("fileHash", "fileHash");
+      }
+      if (e.oldVersion < 4) {
+        // Ders ses kayıtları (işaretler kaydın içindeki ana bağlanır)
+        db.createObjectStore("recordings", { keyPath: "id" }).createIndex("fileHash", "fileHash");
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -179,12 +183,25 @@ function migrateAi(saved: unknown): Settings["ai"] {
   return { ...d, ...rest, keys: { ...d.keys, ...old.keys }, models: { ...d.models, ...old.models } } as Settings["ai"];
 }
 
+export async function recordingsFor(fileHash: string): Promise<Recording[]> {
+  const list: Recording[] = await wrap((await store("recordings")).index("fileHash").getAll(fileHash));
+  return list.sort((a, b) => a.createdAt - b.createdAt);
+}
+
+export async function putRecording(r: Recording): Promise<void> {
+  await wrap((await store("recordings", "readwrite")).put(r));
+}
+
+export async function deleteRecording(id: string): Promise<void> {
+  await wrap((await store("recordings", "readwrite")).delete(id));
+}
+
 export async function saveSettings(s: Settings): Promise<void> {
   await wrap((await store("meta", "readwrite")).put(s, "settings"));
 }
 
 export async function clearAll(): Promise<void> {
-  const stores = ["files", "highlights", "marks", "cards", "meta"];
+  const stores = ["files", "highlights", "marks", "cards", "recordings", "meta"];
   const tx = (await open()).transaction(stores, "readwrite");
   for (const name of stores) tx.objectStore(name).clear();
   await new Promise<void>((resolve, reject) => {

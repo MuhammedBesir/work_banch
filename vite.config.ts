@@ -17,6 +17,7 @@ const csp: Plugin = {
       "worker-src 'self' blob:",
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' blob: data:",
+      "media-src 'self' blob:",
       "font-src 'self' data:",
       // AI açıkken istekler yalnızca kullanıcının kendi anahtarıyla Anthropic API'sine gider.
       // Dışarıya yalnızca AI açıkken ve kullanıcı sorunca: kendi anahtarıyla Anthropic / OpenAI,
