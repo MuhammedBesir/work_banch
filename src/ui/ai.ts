@@ -336,6 +336,7 @@ export class AiPanel {
           cancelAnimationFrame(frame);
           frame = requestAnimationFrame(() => this.renderAnswer(answer, text, false));
         },
+        onNotice: (t) => turn.append(h("p", { class: "cm-ai__usage", text: t })),
         // Cihazda: ilk cevapta model indirilip hazırlanırken ilerleme.
         onProgress: (ratio, info) => {
           answer.replaceChildren(

@@ -95,6 +95,8 @@ export interface AskBase {
   onText(delta: string): void;
   /** Cihazdaki model ilk kullanımda indirilip hazırlanırken: 0–1 arası ilerleme. */
   onProgress?(ratio: number, text: string): void;
+  /** Kısa bilgi (ör. sağlayıcı yoğun olduğu için başka modelle cevaplandı). */
+  onNotice?(text: string): void;
   /** Belgeye dayanmayan iş (el yazısı, matematik, yazıya dökme özeti): kendi sistem istemi, soru olduğu gibi gider. */
   system?: string;
   raw?: boolean;

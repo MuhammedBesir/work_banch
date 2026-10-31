@@ -26,15 +26,44 @@ async function fail(res: Response): Promise<never> {
   throw new GeminiError(res.status, reason, message);
 }
 
-/** Akışlı istek: SSE satırlarından metni toplar. */
-async function stream(model: string, apiKey: string, body: unknown, signal: AbortSignal, onText: (t: string) => void): Promise<AskResult> {
-  const res = await fetch(`${API}/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`, {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
-    body: JSON.stringify(body),
-    signal,
-  });
-  if (!res.ok || !res.body) await fail(res);
+/** Yoğunlukta (500, 503) sırayla denenecek daha hafif modeller. */
+const FALLBACKS = ["gemini-flash-latest", "gemini-flash-lite-latest"];
+const busy = (e: unknown) => e instanceof GeminiError && (e.status === 500 || e.status === 503 || e.status === 504);
+const wait = (ms: number, signal: AbortSignal) => new Promise<void>((resolve, reject) => {
+  const t = setTimeout(resolve, ms);
+  signal.addEventListener("abort", () => (clearTimeout(t), reject(new DOMException("Durduruldu", "AbortError"))), { once: true });
+});
+
+/**
+ * Gemini yoğunken (503 "overloaded") istek iki kez kısa beklemeyle yinelenir, olmazsa daha hafif modele geçilir.
+ * Cevap başladıktan sonra yinelenmez (metin iki kez yazılmasın).
+ */
+async function stream(model: string, apiKey: string, body: unknown, signal: AbortSignal, onText: (t: string) => void, onModel?: (m: string) => void): Promise<AskResult> {
+  const chain = [model, ...FALLBACKS.filter((m) => m !== model)];
+  let last: unknown;
+  for (const m of chain) {
+    for (const delay of [0, 1500, 4000]) {
+      if (delay) await wait(delay, signal);
+      try {
+        const res = await fetch(`${API}/models/${encodeURIComponent(m)}:streamGenerateContent?alt=sse`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
+          body: JSON.stringify(body),
+          signal,
+        });
+        if (!res.ok || !res.body) await fail(res);
+        if (m !== model) onModel?.(m);
+        return await read(res, onText);
+      } catch (e) {
+        if (!busy(e)) throw e;
+        last = e;
+      }
+    }
+  }
+  throw last;
+}
+
+async function read(res: Response, onText: (t: string) => void): Promise<AskResult> {
   const reader = res.body!.pipeThrough(new TextDecoderStream()).getReader();
   let buf = "";
   let text = "";
@@ -84,7 +113,7 @@ export async function ask(o: AskBase, apiKey: string, model: string): Promise<As
     systemInstruction: { parts: [{ text: o.system ?? SYSTEM }] },
     contents,
     generationConfig: { maxOutputTokens: 16000 },
-  }, o.signal, o.onText);
+  }, o.signal, o.onText, (m) => o.onNotice?.(`${model} yoğundu; bu cevap ${m} ile verildi.`));
 }
 
 /** Anahtarın kullanabildiği sohbet modelleri (yeniden eskiye). */
@@ -131,8 +160,13 @@ export function friendlyError(err: unknown): { title: string; text: string } {
     if (err.status === 404) return { title: "Model bulunamadı", text: "Ayarlar > AI'dan başka bir Gemini modeli seç (Modelleri yükle ile güncel listeyi al)." };
     if (err.status === 429) return { title: "İstek sınırına ulaşıldı", text: "Ücretsiz katmanın dakikalık ya da günlük sınırı dolmuş olabilir. Biraz bekleyip yeniden dene ya da daha hafif bir model seç." };
     if (err.status === 400) return { title: "İstek kabul edilmedi", text: "Kapsam çok uzun olabilir. Daha dar bir kapsam seçip yeniden dene." };
-    if (err.status >= 500) return { title: "Gemini şu an yoğun", text: "Bir süre sonra yeniden dene." };
-    return { title: "AI cevap veremedi", text: `Gemini ${err.status} hatası döndürdü. Biraz sonra yeniden dene.` };
+    if (err.status >= 500) {
+      return {
+        title: "Gemini şu an yoğun",
+        text: `Google ${err.status} döndürdü${err.message ? ` („${err.message.slice(0, 160)}")` : ""}. Üç kez ve daha hafif modellerle denendi. Biraz sonra yeniden dene ya da Ayarlar > AI'dan başka bir model seç.`,
+      };
+    }
+    return { title: "AI cevap veremedi", text: `Gemini ${err.status} hatası döndürdü${err.message ? ` („${err.message.slice(0, 160)}")` : ""}. Biraz sonra yeniden dene.` };
   }
   if (err instanceof TypeError) return { title: "Bağlantı kurulamadı", text: "İnternet bağlantını kontrol edip yeniden dene." };
   return { title: "AI cevap veremedi", text: "Beklenmeyen bir sorun oldu. Yeniden dene." };
