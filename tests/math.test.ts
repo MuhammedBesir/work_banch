@@ -15,6 +15,6 @@ describe("AI cevabında matematik", () => {
 
 describe("düz metinde noktalı virgül", () => {
   it("LaTeX boşluk komutu dışındaki ; korunur", () => {
-    expect(mathToPlain("$a;b\;c$")).toBe("a;b c");
+    expect(mathToPlain(String.raw`$a;b\;c$`)).toBe("a;b c");
   });
 });
