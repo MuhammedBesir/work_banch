@@ -40,6 +40,18 @@ test("Gemini: anahtarla kur, modelleri yükle, sayfayı özetlet", async ({ page
   await expect(page.locator(".cm-ai")).toContainText("Normal dağılım çan eğrisidir");
   expect(key).toBe("AIzaSyTEST_test_test_test_test_1234567");
   expect(JSON.stringify(body!.contents.at(-1))).toContain("Bu sayfayı kısa maddeler halinde özetle");
+
+  // AI tek başına kapanır: panel açıkken İşaretler'e döner, kapalıyken panel kapalı kalır.
+  await page.getByRole("button", { name: "AI'yı kapat" }).click();
+  await expect(page.locator(".cm-ai")).toBeHidden();
+  await expect(page.locator(".cm-body")).not.toHaveClass(/no-panel/);
+  await page.getByRole("button", { name: "İşaretler", exact: true }).click();
+  await expect(page.locator(".cm-body")).toHaveClass(/no-panel/);
+  await page.locator(".cm-stage").focus();
+  await page.keyboard.press("Control+j");
+  await expect(page.locator(".cm-ai")).toBeVisible();
+  await page.getByRole("button", { name: "AI'yı kapat" }).click();
+  await expect(page.locator(".cm-body")).toHaveClass(/no-panel/);
   expect(errors).toEqual([]);
 });
 

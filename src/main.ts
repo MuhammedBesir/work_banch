@@ -301,16 +301,36 @@ function showRightTab(tab: "marks" | "ai"): void {
   if (tab === "ai") reader.ai.refresh();
 }
 
+/** AI açılırken panel kapalıydıysa AI kapanınca panel de kapanır; açıktıysa İşaretler'e dönülür. */
+let aiOpenedPanel = false;
+
+function openAi(): void {
+  if (!reader) return;
+  if (rightTab !== "ai") aiOpenedPanel = !panelOpen;
+  if (!panelOpen) togglePanel(true);
+  if (focusMode) setFocus(false);
+  showRightTab("ai");
+}
+
+/** AI'yı kapat: yalnız AI kapanır, İşaretler paneli önceki haline döner. */
+function closeAi(): void {
+  if (!reader || rightTab !== "ai") return;
+  if (reader.ai.isFull) reader.ai.setFull(false);
+  const hidePanel = aiOpenedPanel || !panelOpen;
+  aiOpenedPanel = false;
+  showRightTab("marks");
+  if (hidePanel) togglePanel(false);
+  reader.stage.focus({ preventScroll: true });
+}
+
 /** Ctrl J: AI sekmesini aç/kapat. */
 function toggleAi(): void {
   if (!reader || !aiOn()) return;
   if (panelOpen && rightTab === "ai") {
-    showRightTab("marks");
+    closeAi();
     return;
   }
-  if (!panelOpen) togglePanel(true);
-  if (focusMode) setFocus(false);
-  showRightTab("ai");
+  openAi();
   reader.ai.focus();
 }
 
@@ -924,8 +944,10 @@ async function openReader(file: OpenDoc): Promise<void> {
     h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--icon", "aria-label": label, title: label, ...attrs }, icon(name));
   const themeBtn = iconBtn("moon", "Koyu tema", { class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--icon is-wide", onclick: () => void changeSettings({ ...settings, theme: resolvedTheme() === "dark" ? "light" : "dark" }) });
   const panelBtn = ghost(icon("panel"), { class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--count", title: "İşaretler paneli ( ] )", "aria-label": "İşaretler", "aria-pressed": String(panelOpen), onclick: () => {
-    if (panelOpen && rightTab !== "marks") showRightTab("marks");
-    else togglePanel();
+    if (panelOpen && rightTab !== "marks") {
+      aiOpenedPanel = false;
+      showRightTab("marks");
+    } else togglePanel();
   } }, h("span", { class: "cm-num", text: num(highlights.length) }));
   // Dışa aktar menüsü: Markdown notları, vurgulu PDF ve Tekrar modu girişi.
   const exportBtn = h("button", { class: "cm-btn cm-btn--sm cm-btn--withicon", "aria-haspopup": "menu", "aria-label": "Dışa aktar", title: "Dışa aktar" }, icon("export"), h("span", { class: "is-wide", text: "Dışa aktar" }));
@@ -1084,6 +1106,7 @@ async function openReader(file: OpenDoc): Promise<void> {
   stageWrap.append(audio.el);
 
   const ai = new AiPanel({
+    close: () => closeAi(),
     fullscreen: (on) => reader?.body.classList.toggle("is-ai-full", on),
     settings: () => settings.ai,
     context: (scope, withImage) => aiContext(scope, withImage),
@@ -1103,7 +1126,11 @@ async function openReader(file: OpenDoc): Promise<void> {
   });
   ai.el.hidden = true;
   const tab = (id: "marks" | "ai", label: string) =>
-    h("button", { class: `cm-tab${id === "marks" ? " is-on" : ""}`, role: "tab", "data-tab": id, "aria-selected": String(id === "marks"), onclick: () => showRightTab(id) }, label);
+    h("button", { class: `cm-tab${id === "marks" ? " is-on" : ""}`, role: "tab", "data-tab": id, "aria-selected": String(id === "marks"), onclick: () => {
+      // Sekmeyle elle geçince panel açık kalsın.
+      aiOpenedPanel = false;
+      showRightTab(id);
+    } }, label);
   const rtabs = h("div", { class: "cm-tabs cm-rtabs", role: "tablist", hidden: true }, tab("marks", "İşaretler"), tab("ai", "AI"));
   const right = h("div", { class: "cm-right" }, rtabs, panel.el, ai.el);
   // Genişlik tutamacı sağ sütunda: İşaretler ve AI sekmesinde de çalışır.
@@ -2109,9 +2136,7 @@ function askSelection(): void {
   if (!reader || !aiOn()) return;
   if (pending) lastSelection = pending;
   hideFloat();
-  if (!panelOpen) togglePanel(true);
-  if (focusMode) setFocus(false);
-  showRightTab("ai");
+  openAi();
   reader.ai.askAboutSelection();
 }
 
@@ -2341,8 +2366,7 @@ async function pickArea(): Promise<void> {
   if (!rect || reader !== r) return;
   const [text, image] = await Promise.all([textInRect(rect.page, rect.rect), pageImage(rect.page, rect.rect, 1400)]);
   area = { file: r.file.rec.hash, page: rect.page, rect: rect.rect, text, image: image! };
-  if (!panelOpen) togglePanel(true);
-  showRightTab("ai");
+  openAi();
   r.ai.areaPicked();
 }
 

@@ -16,6 +16,8 @@ export interface AiActions {
   pickArea(): void;
   /** Görüntü gönderebilen sağlayıcı mı (Claude, OpenAI, Gemini). */
   vision(): boolean;
+  /** AI'yı kapat (İşaretler paneli önceki haline döner). */
+  close?(): void;
   /** AI penceresini tam ekran yap / eski haline getir. */
   fullscreen?(on: boolean): void;
   settings(): AiSettings;
@@ -118,6 +120,7 @@ export class AiPanel {
         iconBtn("download", "Sohbeti dışa aktar (.md)", () => (this.history.length ? this.actions.exportChat(this.history) : toast("Dışa aktaracak sohbet yok."))),
         iconBtn("trash", "Sohbeti temizle", () => this.clear()),
         this.fullBtn,
+        ...(this.actions.close ? [h("button", { class: "cm-ai__iconbtn cm-ai__close", "aria-label": "AI'yı kapat", title: "AI'yı kapat (Ctrl J)", onclick: () => this.actions.close!() }, icon("close"))] : []),
       ),
     );
     // Yazma kutusu: üstte kapsam ve araçlar, ortada soru, sağda gönder; altında gönderilecek özeti.
