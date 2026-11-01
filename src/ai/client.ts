@@ -1,5 +1,8 @@
-import type { AiSettings } from "../types";
+import { AI_PROVIDERS, type AiSettings } from "../types";
 import type { AskBase, AskResult } from "./prompt";
+
+/** OpenAI uyumlu bulut servislerinin adresi (CSP connect-src'de de olmalı). */
+export const COMPAT_URL = { groq: "https://api.groq.com/openai/v1", openrouter: "https://openrouter.ai/api/v1" } as const;
 
 // Sağlayıcıya göre istek. Her sağlayıcının SDK'sı ayrı parça olarak yalnızca kullanılınca yüklenir.
 
@@ -11,6 +14,9 @@ export async function ask(ai: AiSettings, o: AskBase): Promise<AskResult> {
       return (await import("./openai")).ask(o, { apiKey: ai.keys.openai, model: ai.models.openai });
     case "gemini":
       return (await import("./gemini")).ask(o, ai.keys.gemini, ai.models.gemini);
+    case "groq":
+    case "openrouter":
+      return (await import("./openai")).ask(o, { apiKey: ai.keys[ai.mode], model: ai.models[ai.mode], baseURL: COMPAT_URL[ai.mode] });
     case "local":
       return (await import("./openai")).ask(o, { apiKey: "", model: ai.models.local, baseURL: ai.localUrl.replace(/\/+$/, "") });
     case "device":
@@ -25,8 +31,10 @@ export async function friendlyError(ai: AiSettings, err: unknown): Promise<{ tit
     case "anthropic":
       return (await import("./anthropic")).friendlyError(err);
     case "openai":
+    case "groq":
+    case "openrouter":
     case "local":
-      return (await import("./openai")).friendlyError(err, ai.mode === "local");
+      return (await import("./openai")).friendlyError(err, ai.mode === "local", AI_PROVIDERS[ai.mode].short);
     case "gemini":
       return (await import("./gemini")).friendlyError(err);
     case "device":
@@ -41,11 +49,13 @@ export function ready(ai: AiSettings): boolean {
   if (ai.mode === "anthropic") return !!ai.keys.anthropic;
   if (ai.mode === "openai") return !!ai.keys.openai;
   if (ai.mode === "gemini") return !!ai.keys.gemini;
+  if (ai.mode === "groq" || ai.mode === "openrouter") return !!ai.keys[ai.mode];
   return ai.mode !== "off";
 }
 
-/** Görsel (el yazısı) gönderebilen sağlayıcı: Claude, OpenAI ve Gemini. */
+/** Görsel (el yazısı, alan) gönderebilen sağlayıcı: Claude, OpenAI, Gemini; Groq'ta yalnız görsel modeller. */
 export function visionReady(ai: AiSettings): boolean {
+  if (ai.mode === "groq") return /llama-4|vision|scout|maverick/i.test(ai.models.groq) && ready(ai);
   return (ai.mode === "anthropic" || ai.mode === "openai" || ai.mode === "gemini") && ready(ai);
 }
 

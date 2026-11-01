@@ -358,7 +358,7 @@ export function openAiSetup(current: AiSettings, save: (ai: AiSettings) => void,
   let gpu: { ok: boolean; reason?: string } | null = null;
 
   // Her seçeneğin alanları: anahtar, model, adres.
-  const keyInput = (p: "anthropic" | "openai" | "gemini", placeholder: string) => {
+  const keyInput = (p: keyof AiSettings["keys"], placeholder: string) => {
     const el = h("input", { class: "cm-input", type: "password", autocomplete: "off", spellcheck: "false", placeholder, "aria-label": `${AI_PROVIDERS[p].label} API anahtarı`, value: ai.keys[p] });
     el.addEventListener("input", () => (ai.keys[p] = el.value.trim()));
     return el;
@@ -378,6 +378,32 @@ export function openAiSetup(current: AiSettings, save: (ai: AiSettings) => void,
     const el = h("input", { class: "cm-input", "aria-label": "Sunucu adresi", value: ai.localUrl, spellcheck: "false" });
     el.addEventListener("input", () => (ai.localUrl = el.value.trim()));
     return el;
+  };
+  // Groq / OpenRouter: anahtar + model (yazılabilir) + hesaptan model listesi.
+  const compatFields = (p: "groq" | "openrouter", placeholder: string, note: string) => {
+    const box = modelInput(p, true);
+    const input = box.querySelector("input")!;
+    const list = box.querySelector("datalist")!;
+    const status = small("");
+    const load = h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm", type: "button", onclick: async () => {
+      if (!ai.keys[p]) return (status.textContent = "Önce anahtarı gir.");
+      status.textContent = "Modeller yükleniyor…";
+      try {
+        const [{ listModels }, { COMPAT_URL }] = await Promise.all([import("../ai/openai"), import("../ai/client")]);
+        let ids = await listModels(ai.keys[p], COMPAT_URL[p]);
+        if (p === "openrouter") ids = ids.filter((id) => id.endsWith(":free") || id === "openrouter/free");
+        list.replaceChildren(...[...new Set([...AI_PROVIDERS[p].models.map(([id]) => id), ...ids])].map((id) => h("option", { value: id })));
+        status.textContent = `Anahtar çalışıyor · ${ids.length} ${p === "openrouter" ? "ücretsiz " : ""}model bulundu. Model kutusuna tıklayıp seçebilirsin.`;
+        input.focus();
+      } catch (e) {
+        const { friendlyError } = await import("../ai/openai");
+        const f = friendlyError(e, false, AI_PROVIDERS[p].short);
+        status.textContent = `${f.title}. ${f.text}`;
+      }
+    } }, "Anahtarı dene ve modelleri yükle");
+    return h("div", { class: "cm-ai-fields" },
+      label(`${AI_PROVIDERS[p].label} API anahtarı`), keyInput(p, placeholder), label("Model"), box,
+      h("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap" }, load), status, small(note));
   };
   const fields: Record<AiProvider, () => HTMLElement> = {
     anthropic: () => h("div", { class: "cm-ai-fields" },
@@ -411,6 +437,8 @@ export function openAiSetup(current: AiSettings, save: (ai: AiSettings) => void,
         label("Gemini API anahtarı"), keyInput("gemini", "AIza…"), label("Model"), sel, h("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap" }, load), status,
         small("Anahtarı aistudio.google.com › Get API key'den alırsın; ücretsiz katmanı vardır. Anahtar yalnızca bu tarayıcıda saklanır, yedeğe girmez. Not: ücretsiz katmanda Google gönderilen metni ürünlerini geliştirmek için kullanabilir."));
     },
+    groq: () => compatFields("groq", "gsk_…", "Anahtarı console.groq.com › API Keys'den kart bilgisi vermeden alırsın. Ücretsiz katman günde yaklaşık 1.000 istek ve dakikada 30 istek verir; çok hızlıdır. Görsel (alan seç) için Llama 4 Scout modelini seç."),
+    openrouter: () => compatFields("openrouter", "sk-or-…", "Anahtarı openrouter.ai › Keys'den alırsın. Adı :free ile biten modeller ücretsizdir (günde ~50 istek; 10 $ kredi yüklersen ~1.000). Ücretsiz modellerde gönderilen metin kaydedilebilir."),
     openai: () => h("div", { class: "cm-ai-fields" },
       label("OpenAI API anahtarı"), keyInput("openai", "sk-…"), label("Model"), modelInput("openai", true),
       small("Model adını OpenAI hesabında kullanabildiğin modellerden yaz. Ücret gösterilmez; harcamayı OpenAI panelinden izle.")),
@@ -437,6 +465,8 @@ export function openAiSetup(current: AiSettings, save: (ai: AiSettings) => void,
       ["local", "Bilgisayarımdaki model", "Ollama ya da LM Studio gibi yerel bir sunucu. Metin bilgisayarından çıkmaz."],
       ["anthropic", "Kendi Anthropic anahtarınla (Claude)", "Seçtiğin metin tarayıcından doğrudan Anthropic'e gider; arada bizim sunucumuz yok. Hızlı ve güçlü."],
       ["gemini", "Kendi Google Gemini anahtarınla", "Seçtiğin metin tarayıcından doğrudan Google'a gider; arada bizim sunucumuz yok. Ücretsiz katmanı var; ses kaydını da yazıya döker."],
+      ["groq", "Groq (ücretsiz, çok hızlı)", "Ücretsiz anahtarla açık modeller (Llama, GPT-OSS). Günlük sınırı yüksek; başka servisin sınırı dolunca iyi bir yedek. Metin doğrudan Groq'a gider."],
+      ["openrouter", "OpenRouter (ücretsiz modeller)", "Tek anahtarla birçok ücretsiz model. Günlük sınırı düşük; denemek için uygun. Metin doğrudan OpenRouter'a gider."],
       ["openai", "Kendi OpenAI anahtarınla", "Seçtiğin metin tarayıcından doğrudan OpenAI'ye gider; arada bizim sunucumuz yok."],
       ["off", "Kapalı", "AI düğmeleri gizlenir. İstediğin zaman Ayarlar'dan açabilirsin."],
     ];
@@ -469,12 +499,12 @@ export function openAiSetup(current: AiSettings, save: (ai: AiSettings) => void,
       ),
     ),
   );
-  const hasKeys = !!(current.keys.anthropic || current.keys.openai || current.keys.gemini);
+  const hasKeys = Object.values(current.keys).some(Boolean);
   d.foot.append(
     h("span", { class: "cm-trust", text: "Seçimin ve anahtarların bu tarayıcıda saklanır." }),
     h("div", { style: "display:flex;gap:8px" },
       hasKeys ? h("button", { class: "cm-btn cm-btn--ghost cm-btn--danger", onclick: () => {
-        save({ ...current, keys: { anthropic: "", openai: "", gemini: "" }, mode: AI_PROVIDERS[current.mode as AiProvider]?.cloud ? "off" : current.mode });
+        save({ ...current, keys: { anthropic: "", openai: "", gemini: "", groq: "", openrouter: "" }, mode: AI_PROVIDERS[current.mode as AiProvider]?.cloud ? "off" : current.mode });
         toast("API anahtarları silindi");
         d.close();
       } }, "Anahtarları sil") : h("span"),
@@ -487,6 +517,9 @@ export function openAiSetup(current: AiSettings, save: (ai: AiSettings) => void,
         if (ai.mode === "anthropic" && !/^sk-ant-/.test(ai.keys.anthropic)) return fail("Bu bir Anthropic API anahtarına benzemiyor. Anahtarlar sk-ant- ile başlar; console.anthropic.com'dan alabilirsin.");
         if (ai.mode === "openai" && !/^sk-/.test(ai.keys.openai)) return fail("Bu bir OpenAI API anahtarına benzemiyor. Anahtarlar sk- ile başlar; platform.openai.com'dan alabilirsin.");
         if (ai.mode === "gemini" && (ai.keys.gemini.length < 20 || /\s/.test(ai.keys.gemini))) return fail("Bu bir Gemini API anahtarına benzemiyor. aistudio.google.com › Get API key'den alıp buraya yapıştır.");
+        if (ai.mode === "groq" && !/^gsk_\S{20,}$/.test(ai.keys.groq)) return fail("Bu bir Groq API anahtarına benzemiyor. Anahtarlar gsk_ ile başlar; console.groq.com › API Keys'den alabilirsin.");
+        if (ai.mode === "openrouter" && !/^sk-or-\S{20,}$/.test(ai.keys.openrouter)) return fail("Bu bir OpenRouter API anahtarına benzemiyor. Anahtarlar sk-or- ile başlar; openrouter.ai › Keys'den alabilirsin.");
+        if ((ai.mode === "groq" || ai.mode === "openrouter") && !ai.models[ai.mode]) return fail("Bir model adı seç ya da yaz.");
         if (ai.mode === "local" && !/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(ai.localUrl)) return fail("Yerel sunucu adresi http://localhost:PORT/v1 biçiminde olmalı. Güvenlik için yalnızca bu bilgisayardaki sunuculara bağlanılır.");
         if (ai.mode !== "off" && !ai.models[ai.mode]) return fail("Model adını yaz.");
         save(ai);

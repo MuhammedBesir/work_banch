@@ -88,8 +88,7 @@ export async function analyzePage(doc: PDFDocumentProxy, index: number): Promise
   const vp1 = page.getViewport({ scale: 1 });
   const vp = page.getViewport({ scale: SAMPLE_W / vp1.width });
   const boxes = textBoxes(items, vp.width, vp.height, vp.transform);
-  if (!text.trim()) return { need: "full", boxes };
-  if (text.replace(/\s/g, "").length >= 20 && garbledRatio(text) > 0.3) return { need: "garbled", boxes };
+  if (text.trim() && text.replace(/\s/g, "").length >= 20 && garbledRatio(text) > 0.3) return { need: "garbled", boxes };
 
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.floor(vp.width));
@@ -106,6 +105,8 @@ export async function analyzePage(doc: PDFDocumentProxy, index: number): Promise
     if (lum < 170) ink[j] = 1;
   }
   const { ratio, area } = uncoveredInk(ink, canvas.width, canvas.height, boxes);
+  // Metinsiz sayfa: boşsa (yeni not defteri sayfası) tanınacak bir şey yok.
+  if (!text.trim()) return { need: area > 0.002 ? "full" : "none", boxes };
   // Metinsiz mürekkebin hem payı hem miktarı anlamlıysa (küçük logo, çizgi, sayfa numarası değil) tanı.
   return { need: ratio > 0.2 && area > 0.004 ? "extra" : "none", boxes };
 }

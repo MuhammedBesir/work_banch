@@ -27,7 +27,7 @@ export async function createBackup(): Promise<Backup> {
     app: "calisma-masasi",
     version: 1,
     createdAt: new Date().toISOString(),
-    settings: { ...settings, ai: { ...settings.ai, keys: { anthropic: "", openai: "", gemini: "" } } },
+    settings: { ...settings, ai: { ...settings.ai, keys: Object.fromEntries(Object.keys(settings.ai.keys).map((k) => [k, ""])) as typeof settings.ai.keys } },
     files: files.map(({ handle: _h, ...rest }) => rest),
     highlights,
     marks,

@@ -35,16 +35,31 @@ export async function ask(o: AskBase, opts: { apiKey: string; model: string; bas
   return { text, stop, usage };
 }
 
-export function friendlyError(err: unknown, local: boolean): { title: string; text: string } {
+export function friendlyError(err: unknown, local: boolean, name = "Sağlayıcı"): { title: string; text: string } {
   if (err instanceof OpenAI.APIUserAbortError) return { title: "Durduruldu", text: "Cevap yarıda kesildi. İstersen yeniden üret." };
   if (local && err instanceof OpenAI.APIConnectionError) {
     return { title: "Yerel sunucuya bağlanılamadı", text: "Ollama ya da LM Studio açık mı? Adresi Ayarlar > AI'dan kontrol et; tarayıcıdan erişim için sunucuda CORS'a izin verilmeli (Ollama: OLLAMA_ORIGINS)." };
   }
   if (err instanceof OpenAI.AuthenticationError) return { title: "API anahtarı geçersiz", text: "Ayarlar > AI'dan anahtarını kontrol et ya da yenisini gir." };
   if (err instanceof OpenAI.NotFoundError) return { title: "Model bulunamadı", text: "Model adını Ayarlar > AI'dan kontrol et." };
-  if (err instanceof OpenAI.RateLimitError) return { title: "İstek sınırına ulaşıldı", text: "Sağlayıcı şu an daha fazla istek kabul etmiyor ya da kredin bitti. Biraz bekleyip yeniden dene." };
+  if (err instanceof OpenAI.RateLimitError) {
+    // Bekleme süresi: retry-after başlığı (CORS'ta gizli olabilir) ya da mesajdaki "try again in 1m2.5s".
+    const m = /try again in (?:(\d+)h)?(?:(\d+)m)?(?:([\d.]+)s)?/i.exec(err.message);
+    const fromMsg = m && (m[1] || m[2] || m[3]) ? Number(m[1] ?? 0) * 3600 + Number(m[2] ?? 0) * 60 + Number(m[3] ?? 0) : NaN;
+    const wait = Number(err.headers?.get?.("retry-after") ?? fromMsg);
+    const when = Number.isFinite(wait) && wait > 0 ? (wait < 90 ? `${Math.ceil(wait)} sn sonra` : `Yaklaşık ${Math.ceil(wait / 60)} dk sonra`) : "Biraz sonra";
+    return { title: `${name} sınırı doldu`, text: `Ücretsiz katmanın dakikalık ya da günlük sınırına ulaşıldı. ${when} yeniden dene ya da Ayarlar > AI'dan başka bir sağlayıcıya geç.` };
+  }
   if (err instanceof OpenAI.BadRequestError) return { title: "İstek kabul edilmedi", text: "Kapsam çok uzun olabilir. Daha dar bir kapsam seçip yeniden dene." };
   if (err instanceof OpenAI.APIConnectionError) return { title: "Bağlantı kurulamadı", text: "İnternet bağlantını kontrol edip yeniden dene." };
   if (err instanceof OpenAI.APIError) return { title: "AI cevap veremedi", text: `Sağlayıcı ${err.status ?? ""} hatası döndürdü. Biraz sonra yeniden dene.`.replace("  ", " ") };
   return { title: "AI cevap veremedi", text: "Beklenmeyen bir sorun oldu. Yeniden dene." };
+}
+
+/** OpenAI uyumlu servisteki modeller (anahtar denemesi de olur). */
+export async function listModels(apiKey: string, baseURL: string): Promise<string[]> {
+  const client = new OpenAI({ apiKey, baseURL, dangerouslyAllowBrowser: true, maxRetries: 0 });
+  const ids: string[] = [];
+  for await (const m of client.models.list()) ids.push(m.id);
+  return ids.sort();
 }

@@ -167,3 +167,49 @@ test("AI ile quiz: oluştur, cevapla, kontrol et", async ({ page, browserName })
   const a11y = await new AxeBuilder({ page }).include(".cm-quizzes").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
   expect(a11y.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)).toEqual([]);
 });
+
+// Groq (OpenAI uyumlu): anahtar, model listesi, akış ve sınır dolunca anlaşılır mesaj.
+test("Groq: ücretsiz anahtarla kur, sayfayı özetlet, sınır mesajı", async ({ page, browserName }) => {
+  test.skip(browserName !== "chromium", "ağ taklidi bir tarayıcıda yeterli");
+  const errors = collectErrors(page);
+  let auth = "";
+  let limited = false;
+  await page.route("https://api.groq.com/openai/v1/models", (route) =>
+    route.fulfill({ json: { object: "list", data: [{ id: "llama-3.3-70b-versatile", object: "model" }, { id: "qwen/qwen3-32b", object: "model" }] } }));
+  await page.route("https://api.groq.com/openai/v1/chat/completions", async (route) => {
+    auth = route.request().headers()["authorization"];
+    if (limited) {
+      await route.fulfill({ status: 429, headers: { "retry-after": "42" }, json: { error: { message: "Rate limit reached for model llama-3.3-70b-versatile. Please try again in 42s.", type: "tokens", code: "rate_limit_exceeded" } } });
+      return;
+    }
+    const chunk = (o: unknown) => `data: ${JSON.stringify(o)}\n\n`;
+    const base = { id: "c1", object: "chat.completion.chunk", created: 1, model: "llama-3.3-70b-versatile" };
+    await route.fulfill({
+      headers: { "content-type": "text/event-stream" },
+      body: chunk({ ...base, choices: [{ index: 0, delta: { role: "assistant", content: "Groq cevabı: çan eğrisi " } }] })
+        + chunk({ ...base, choices: [{ index: 0, delta: { content: "[s. 1]." }, finish_reason: "stop" }] })
+        + "data: [DONE]\n\n",
+    });
+  });
+  await openSample(page);
+  await page.locator(".cm-bar__file").click();
+  await page.getByRole("menuitem", { name: "Ayarlar" }).click();
+  await page.locator(".cm-dialog").getByRole("button", { name: /AI'yı aç|AI ayarları|Değiştir/ }).first().click();
+  await page.getByRole("radio", { name: /Groq/ }).click();
+  await page.getByLabel("Groq API anahtarı").fill("gsk_TEST_test_test_test_test_1234567");
+  await page.getByRole("button", { name: "Anahtarı dene ve modelleri yükle" }).click();
+  await expect(page.getByText(/Anahtar çalışıyor · 2 model bulundu/)).toBeVisible();
+  await page.getByRole("button", { name: "Kaydet" }).last().click();
+  await page.keyboard.press("Escape");
+  await page.locator(".cm-stage").focus();
+  await page.keyboard.press("Control+j");
+  await page.getByRole("button", { name: "Bu sayfayı özetle" }).click();
+  await expect(page.locator(".cm-ai")).toContainText("Groq cevabı: çan eğrisi");
+  expect(auth).toBe("Bearer gsk_TEST_test_test_test_test_1234567");
+  limited = true;
+  await page.getByLabel("AI'ya sor").fill("Bir daha özetle");
+  await page.getByLabel("AI'ya sor").press("Enter");
+  await expect(page.locator(".cm-ai")).toContainText("Groq sınırı doldu");
+  await expect(page.locator(".cm-ai")).toContainText("42 sn sonra");
+  expect(errors.filter((e) => !/429|Too Many/.test(e))).toEqual([]);
+});

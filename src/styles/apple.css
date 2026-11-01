@@ -1,0 +1,214 @@
+/* ==========================================================================
+   Apple minimal katmanı: nötr griler, sistem yazı tipi (SF), saç teli çizgiler,
+   geniş yarıçaplar, yumuşak gölgeler, sakin vurgular. Son yüklenir; tokenları
+   ve bileşenlerin yüzeyini inceltir, düzeni değiştirmez.
+   ========================================================================== */
+
+:root {
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", system-ui, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --ease: cubic-bezier(.25, .1, .25, 1);
+}
+
+:root, [data-theme="light"] {
+  --paper: #f5f5f7;
+  --surface: #fbfbfd;
+  --surface-raised: #ffffff;
+  --sheet: #ffffff;
+  --sheet-ink: #1d1d1f;
+  --ink: #1d1d1f;
+  --ink-muted: #636366;
+  --ink-secondary: #48484a;
+  --line: #e8e8ed;
+  --line-strong: #d2d2d7;
+  --control-border: #d2d2d7;
+  --accent: #0066cc;
+  --accent-hover: #0058b0;
+  --on-accent: #ffffff;
+  --accent-soft: #e8f0fb;
+  --focus: #0071e3;
+  --selection: #b3d4fc;
+  --danger: #d70015;
+  --danger-soft: #fdeceb;
+  --warning: #8a5300;
+  --warning-soft: #fdf3e1;
+  --pen-blue: #0066cc;
+  --ai-cite: #0066cc;
+  --scrim: rgba(0, 0, 0, 0.28);
+  --shadow-sheet: 0 1px 3px rgba(0, 0, 0, 0.06), 0 0 0 0.5px rgba(0, 0, 0, 0.08);
+  --shadow-float: 0 10px 30px rgba(0, 0, 0, 0.10), 0 1px 3px rgba(0, 0, 0, 0.06), 0 0 0 0.5px rgba(0, 0, 0, 0.08);
+  --accent-fill: #0066cc;
+  --accent-fill-hover: #0058b0;
+  --glass: rgba(255, 255, 255, 0.78);
+  --fill: rgba(118, 118, 128, 0.12);
+  --fill-strong: rgba(118, 118, 128, 0.2);
+}
+
+[data-theme="dark"] {
+  --paper: #000000;
+  --surface: #161617;
+  --surface-raised: #1c1c1e;
+  --sheet: #dcdcde;
+  --sheet-ink: #1d1d1f;
+  --ink: #f5f5f7;
+  --ink-muted: #98989d;
+  --ink-secondary: #c7c7cc;
+  --line: #2c2c2e;
+  --line-strong: #3a3a3c;
+  --control-border: #48484a;
+  --accent: #2997ff;
+  --accent-hover: #4aa8ff;
+  --on-accent: #ffffff;
+  --accent-soft: #0b2a4a;
+  --focus: #2997ff;
+  --selection: #3a6ea5;
+  --danger: #ff453a;
+  --danger-soft: #3b1513;
+  --warning: #ffb340;
+  --warning-soft: #33260f;
+  --ai-cite: #2a6299;
+  --scrim: rgba(0, 0, 0, 0.6);
+  --shadow-sheet: 0 1px 3px rgba(0, 0, 0, 0.5), 0 0 0 0.5px rgba(255, 255, 255, 0.06);
+  --shadow-float: 0 12px 36px rgba(0, 0, 0, 0.55), 0 0 0 0.5px rgba(255, 255, 255, 0.10);
+  --accent-fill: #0071e3;
+  --accent-fill-hover: #0a6fd6;
+  --glass: rgba(28, 28, 30, 0.78);
+  --fill: rgba(118, 118, 128, 0.24);
+  --fill-strong: rgba(118, 118, 128, 0.36);
+}
+/* Dolu mavi yüzeyler (beyaz yazılı): koyu temada da AA kontrastı için ayrı ton. */
+.cm-btn--primary, .cm-tool.is-on, .cm-palette .cm-tool.is-on { background: var(--accent-fill) !important; color: #fff !important; }
+.cm-btn--primary:hover { background: var(--accent-fill-hover) !important; }
+
+body { letter-spacing: -0.01em; text-rendering: optimizeLegibility; }
+
+/* ---------- Tipografi: arayüzde serif yok; içerik (not, PDF) kendi yazı tipinde ---------- */
+.cm-bar__brand, .cm-dialog__title, .cm-display, .cm-recent__head h2, .cm-panel__empty h3,
+.cm-quizzes__title, .cm-quiz__head h3, .cm-ai__emptytitle, .cm-cover__initial {
+  font-family: var(--font-display) !important;
+  letter-spacing: -0.022em;
+}
+.cm-display { font-size: 32px; line-height: 38px; font-weight: 700; }
+.cm-dialog__title { font-size: 19px; line-height: 24px; font-weight: 600; }
+.cm-bar__brand { font-size: 15px; font-weight: 600; }
+.cm-ai__a { font-family: var(--font-sans); font-size: 15px; line-height: 24px; letter-spacing: -0.005em; }
+.cm-card__q { font-family: var(--font-display); font-size: 26px; line-height: 34px; letter-spacing: -0.022em; }
+.cm-card__a { font-family: var(--font-sans); font-size: 17px; line-height: 27px; letter-spacing: -0.01em; }
+/* Sayılar: eş genişlikli rakamlar, ama makine yazısı değil. */
+.cm-num { font-family: var(--font-sans); font-size: 12px; letter-spacing: 0; }
+.cm-label { font-size: 11px; letter-spacing: .06em; font-weight: 600; color: var(--ink-muted); }
+
+/* ---------- Üst çubuk ---------- */
+.cm-bar { background: var(--surface); border-bottom: 0.5px solid var(--line-strong); }
+.cm-bar__brand svg, .cm-bar__brand img { border-radius: 7px; }
+
+/* ---------- Düğmeler ---------- */
+.cm-btn {
+  border-radius: var(--radius-sm); border: 0; background: var(--fill); font-weight: 500;
+  transition: background-color .15s var(--ease), color .15s var(--ease), transform .1s var(--ease), box-shadow .15s var(--ease);
+}
+.cm-btn:hover { background: var(--fill-strong); }
+.cm-btn:active:not(:disabled) { transform: scale(.97); }
+.cm-btn--primary { font-weight: 600; }
+.cm-btn--ghost { background: transparent; }
+.cm-btn--ghost:hover { background: var(--fill); }
+.cm-btn.is-on { background: var(--accent-soft); color: var(--accent); }
+.cm-btn--lg { border-radius: 980px; padding: 0 22px; min-height: 44px; font-size: 15px; }
+.cm-btn:focus-visible, .cm-input:focus-visible, .cm-tab:focus-visible, .cm-seg button:focus-visible {
+  outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 40%, transparent);
+}
+.cm-btn--primary .cm-kbd { background: rgba(0, 0, 0, .2); border-color: transparent; color: #fff; }
+
+/* Kısayol rozeti: hafif, kabartmasız. */
+.cm-kbd { border: 0; background: var(--fill); color: var(--ink-secondary); border-radius: 5px; font-family: var(--font-sans); font-size: 11px; font-weight: 500; padding: 0 5px; }
+
+/* ---------- Girişler ---------- */
+.cm-input, select.cm-input, .cm-notebox {
+  border: 0.5px solid var(--control-border); border-radius: var(--radius-sm); background: var(--surface-raised);
+  transition: box-shadow .15s var(--ease), border-color .15s var(--ease);
+}
+.cm-input:focus, .cm-notebox:focus { border-color: var(--focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent); outline: none; }
+
+/* ---------- Bölümlü denetim (iOS segmented control) ---------- */
+.cm-seg { border: 0; border-radius: 9px; background: var(--fill); padding: 2px; gap: 2px; }
+.cm-seg button { border: 0 !important; border-radius: 7px; background: transparent; min-height: 28px; font-weight: 500; transition: background-color .15s var(--ease), box-shadow .15s var(--ease); }
+.cm-seg button:hover:not(.is-on) { background: var(--fill); }
+.cm-seg button.is-on { background: var(--surface-raised); color: var(--ink); font-weight: 600; box-shadow: 0 1px 3px rgba(0, 0, 0, .12), 0 0 0 0.5px rgba(0, 0, 0, .04); }
+[data-theme="dark"] .cm-seg button.is-on { background: #636366; }
+
+/* ---------- Seçenek kartları (AI ayarı) ---------- */
+.cm-option { border: 0.5px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-raised); transition: border-color .15s var(--ease), background-color .15s var(--ease); }
+.cm-option:hover:not(:disabled) { border-color: var(--control-border); }
+.cm-option.is-on { border: 1.5px solid var(--accent); padding: 11.5px; background: var(--accent-soft); }
+
+/* ---------- Diyalog, menü, araç kutuları: buzlu cam ---------- */
+.cm-scrim { backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.cm-dialog { border-radius: var(--radius-xl); box-shadow: var(--shadow-float); }
+.cm-dialog__head { border-bottom: 0; padding: 20px 24px 8px; }
+.cm-dialog__foot { border-top: 0.5px solid var(--line); background: var(--surface); }
+.cm-menu, .cm-search, .cm-float, .cm-palette {
+  background: var(--glass); backdrop-filter: saturate(180%) blur(20px); -webkit-backdrop-filter: saturate(180%) blur(20px);
+}
+.cm-menu { border-radius: 12px; padding: 5px; border: 0; }
+.cm-menu .cm-btn { border-radius: 7px; background: transparent; font-weight: 400; min-height: 30px; }
+.cm-menu .cm-btn:hover { background: var(--accent-fill); color: #fff; }
+.cm-menu .cm-btn:hover .cm-kbd, .cm-menu .cm-btn:hover .cm-muted { color: rgba(255, 255, 255, .85); background: rgba(255, 255, 255, .18); }
+.cm-menu__sep { background: var(--line); margin: 5px 8px; }
+.cm-search { border-radius: 14px; }
+.cm-palette { border-radius: 16px; border: 0; }
+
+/* ---------- Bildirim, tost ---------- */
+.cm-toast { border-radius: 980px; padding: 8px 8px 8px 18px; background: color-mix(in srgb, var(--ink) 92%, transparent); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); box-shadow: 0 8px 24px rgba(0, 0, 0, .18); }
+.cm-toast:not(:has(.cm-btn)) { padding: 9px 18px; }
+.cm-notice { border-radius: var(--radius-md); border: 0; background: var(--surface-raised); box-shadow: var(--shadow-sheet); }
+
+/* ---------- Çipler, sekmeler ---------- */
+.cm-chip { border: 0; background: var(--fill); border-radius: 980px; padding: 0 10px; transition: background-color .15s var(--ease); }
+.cm-chip:hover { background: var(--fill-strong); }
+.cm-chip.is-on { background: var(--ink); color: var(--paper); }
+.cm-chip.is-on .cm-num { color: color-mix(in srgb, var(--paper) 75%, transparent); }
+.cm-rail__tabs, .cm-rtabs { background: var(--fill) !important; border-radius: 9px !important; padding: 2px !important; }
+.cm-rail__tabs .cm-tab, .cm-rtabs .cm-tab { border-radius: 7px; }
+.cm-rail__tabs .cm-tab.is-on, .cm-rtabs .cm-tab.is-on { box-shadow: 0 1px 3px rgba(0, 0, 0, .12), 0 0 0 0.5px rgba(0, 0, 0, .04); }
+[data-theme="dark"] .cm-rail__tabs .cm-tab.is-on, [data-theme="dark"] .cm-rtabs .cm-tab.is-on { background: #636366; }
+
+/* ---------- Kenar çubukları, panel ---------- */
+.cm-rail, .cm-panel { background: var(--surface); }
+.cm-rail { border-right: 0.5px solid var(--line-strong); }
+.cm-panel, .cm-right { border-left-width: 0.5px; }
+.cm-item { border-bottom: 0.5px solid var(--line); transition: background-color .12s var(--ease); }
+.cm-item.is-selected { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.cm-group__head { background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 0.5px solid var(--line); }
+
+/* ---------- Sayfa ---------- */
+.cm-page { border-radius: 2px; }
+
+/* ---------- Ana ekran ---------- */
+.cm-drop { border: 0; border-radius: 24px; background: var(--surface-raised); box-shadow: var(--shadow-sheet); }
+.cm-drop.is-over { box-shadow: 0 0 0 2px var(--accent), var(--shadow-float); background: var(--accent-soft); }
+.cm-drop__icon { border-radius: 16px; }
+
+/* ---------- Tablo ---------- */
+.cm-table th { border-bottom: 0.5px solid var(--line-strong); font-size: 11px; letter-spacing: .06em; }
+.cm-table td { border-bottom: 0.5px solid var(--line); }
+
+/* ---------- Kaydırma çubuğu: ince, kendiliğinden kaybolan görünüm ---------- */
+* { scrollbar-width: thin; scrollbar-color: var(--fill-strong) transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cm-btn, .cm-seg button, .cm-option, .cm-chip, .cm-item, .cm-input { transition: none; }
+  .cm-btn:active:not(:disabled) { transform: none; }
+}
+
+/* Filtre çipleri (panel, tekrar): Apple tarzı dolu seçili durum. */
+.cm-panel .cm-chip, .cm-review-screen .cm-chip { background: var(--fill); }
+.cm-panel .cm-chip:hover, .cm-review-screen .cm-chip:hover { background: var(--fill-strong); }
+.cm-panel .cm-chip.is-on, .cm-review-screen .cm-chip.is-on { background: var(--ink); color: var(--paper); box-shadow: none; }
+.cm-panel .cm-chip.is-on .cm-num, .cm-review-screen .cm-chip.is-on .cm-num { color: color-mix(in srgb, var(--paper) 72%, transparent); }
+/* Mobil alt gezinme: saç teli ve buzlu cam. */
+.cm-mnav { background: var(--glass); backdrop-filter: saturate(180%) blur(20px); -webkit-backdrop-filter: saturate(180%) blur(20px); border-top: 0.5px solid var(--line-strong); }

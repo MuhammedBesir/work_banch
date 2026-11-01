@@ -125,13 +125,13 @@ export type PdfDark = "soften" | "original";
 export type UiSize = "small" | "normal" | "large";
 
 /** AI'nın nerede çalıştığı: bulut sağlayıcısı (kendi anahtarınla), bilgisayardaki yerel sunucu ya da tarayıcıda (cihazda). */
-export type AiProvider = "anthropic" | "openai" | "gemini" | "local" | "device";
+export type AiProvider = "anthropic" | "openai" | "gemini" | "groq" | "openrouter" | "local" | "device";
 export type AiMode = "off" | AiProvider;
 
 export interface AiSettings {
   mode: AiMode;
   /** Yalnızca bu tarayıcıda saklanır; yedeğe girmez. */
-  keys: { anthropic: string; openai: string; gemini: string };
+  keys: { anthropic: string; openai: string; gemini: string; groq: string; openrouter: string };
   models: Record<AiProvider, string>;
   /** OpenAI uyumlu yerel sunucu (Ollama, LM Studio). */
   localUrl: string;
@@ -151,6 +151,15 @@ export const AI_PROVIDERS: Record<AiProvider, { label: string; short: string; cl
   gemini: {
     label: "Google Gemini", short: "Gemini", cloud: true,
     models: [["gemini-flash-latest", "Gemini Flash (güncel, hızlı)"], ["gemini-pro-latest", "Gemini Pro (güncel, en iyi)"], ["gemini-flash-lite-latest", "Gemini Flash-Lite (en ucuz)"]],
+  },
+  // OpenAI uyumlu ücretsiz katmanlı servisler. Model listesi "Modelleri yükle" ile hesaptan da çekilir.
+  groq: {
+    label: "Groq", short: "Groq", cloud: true,
+    models: [["llama-3.3-70b-versatile", "Llama 3.3 70B (önerilen)"], ["openai/gpt-oss-120b", "GPT-OSS 120B"], ["llama-3.1-8b-instant", "Llama 3.1 8B (en hızlı)"], ["meta-llama/llama-4-scout-17b-16e-instruct", "Llama 4 Scout (görsel)"]],
+  },
+  openrouter: {
+    label: "OpenRouter", short: "OpenRouter", cloud: true,
+    models: [["openrouter/free", "Ücretsiz modeller (otomatik)"], ["meta-llama/llama-3.3-70b-instruct:free", "Llama 3.3 70B (ücretsiz)"], ["deepseek/deepseek-chat-v3-0324:free", "DeepSeek V3 (ücretsiz)"]],
   },
   local: { label: "Bilgisayarımdaki model (Ollama, LM Studio)", short: "Yerel sunucu", cloud: false, models: [["llama3.1", "llama3.1"], ["qwen2.5", "qwen2.5"]] },
   device: {
@@ -207,8 +216,8 @@ export const DEFAULT_SETTINGS: Settings = {
   panelOpen: true,
   ai: {
     mode: "off",
-    keys: { anthropic: "", openai: "", gemini: "" },
-    models: { anthropic: "claude-opus-5-5", openai: "gpt-5-mini", gemini: "gemini-flash-latest", local: "llama3.1", device: "Qwen2.5-1.5B-Instruct-q4f16_1-MLC" },
+    keys: { anthropic: "", openai: "", gemini: "", groq: "", openrouter: "" },
+    models: { anthropic: "claude-opus-5-5", openai: "gpt-5-mini", gemini: "gemini-flash-latest", groq: "llama-3.3-70b-versatile", openrouter: "openrouter/free", local: "llama3.1", device: "Qwen2.5-1.5B-Instruct-q4f16_1-MLC" },
     localUrl: "http://localhost:11434/v1",
   },
   pen: { color: "blue", width: 2 },

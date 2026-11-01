@@ -8,6 +8,7 @@ import "@fontsource/source-serif-4/600.css";
 import "./styles/tokens.css";
 import "./styles/components.css";
 import "./styles/app.css";
+import "./styles/apple.css";
 
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import * as db from "./db";
@@ -135,7 +136,9 @@ let analyzed = new Map<number, Promise<PageAnalysis>>();
 /** Otomatik OCR kuyruğu: görüntülenen sayfa ve komşuları. */
 let autoQueue: number[] = [];
 let autoSeen = new Set<number>();
-let autoBusy = false;
+/** Belge her kapanışta yeni nesil: eski belgenin süren taraması yeni belgeyi bekletmez, hatası sessizce biter. */
+let autoGen = 0;
+let autoBusy = -1;
 let autoTimer = 0;
 let autoPill: HTMLElement | null = null;
 /** Tanınmış el yazısı (meta `hw:<hash>`): sayfa → kelimeler ve hangi çizimlerden tanındığı. */
@@ -841,6 +844,7 @@ function closeReader(): void {
     void stopOcr();
   }
   autoQueue = [];
+  autoGen++;
   clearTimeout(autoTimer);
   autoPill?.remove();
   autoPill = null;
@@ -1323,12 +1327,13 @@ function scheduleAutoOcr(i: number): void {
 }
 
 async function pumpAutoOcr(): Promise<void> {
-  if (autoBusy || ocrRun || !reader) return;
-  autoBusy = true;
+  if (autoBusy === autoGen || ocrRun || !reader) return;
+  const gen = autoGen;
+  autoBusy = gen;
   const r = reader;
   let found = 0;
   try {
-    while (autoQueue.length && reader === r && !ocrRun && settings.autoOcr !== false) {
+    while (autoQueue.length && reader === r && gen === autoGen && !ocrRun && settings.autoOcr !== false) {
       const i = autoQueue.shift()!;
       if (autoSeen.has(i) || ocrPages.has(i)) continue;
       autoSeen.add(i);
@@ -1343,10 +1348,11 @@ async function pumpAutoOcr(): Promise<void> {
       try {
         page = await ocrPageFor(i, (st, ratio) => st.startsWith("loading") && showAutoPill(`Tanıma verisi yükleniyor… %${Math.round(ratio * 100)}`));
       } catch (err) {
-        console.error(err);
+        // Belge bu sırada kapandıysa (yeniden açma, sayfa ekleme) hata beklenen bir durum.
+        if (gen === autoGen) console.error(err);
         break;
       }
-      if (reader !== r || ocrRun) break;
+      if (reader !== r || gen !== autoGen || ocrRun) break;
       if (!page.lines.length) continue;
       ocrPages.set(i, page);
       found++;
@@ -1355,8 +1361,8 @@ async function pumpAutoOcr(): Promise<void> {
       await db.putMeta(`ocr:${r.file.rec.hash}`, Object.fromEntries(ocrPages));
     }
   } finally {
-    autoBusy = false;
-    if (reader === r) {
+    if (autoBusy === gen) autoBusy = -1;
+    if (reader === r && gen === autoGen) {
       autoPill?.remove();
       autoPill = null;
       // Taranmış belge uyarısı otomatik tanımadan sonra gereksiz.

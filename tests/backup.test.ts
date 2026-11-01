@@ -11,10 +11,12 @@ describe("yedek", () => {
     await db.putMeta("quiz:h1", [{ id: "q", title: "Quiz", createdAt: 1, summary: "", questions: [] }]);
     await db.putMeta("backupDir", "yedeğe girmemeli");
     const s = await db.loadSettings();
-    await db.saveSettings({ ...s, ai: { ...s.ai, mode: "anthropic", keys: { gemini: "", anthropic: "sk-ant-gizli", openai: "sk-gizli2" } } });
+    await db.saveSettings({ ...s, ai: { ...s.ai, mode: "anthropic", keys: { gemini: "", anthropic: "sk-ant-gizli", openai: "sk-gizli2", groq: "gsk_gizli3", openrouter: "sk-or-gizli4" } } });
     const b = parseBackup(JSON.stringify(await createBackup()));
     expect(JSON.stringify(b)).not.toContain("sk-ant-gizli"); // anahtarlar yedeğe girmez
     expect(JSON.stringify(b)).not.toContain("sk-gizli2");
+    expect(JSON.stringify(b)).not.toContain("gsk_gizli3");
+    expect(JSON.stringify(b)).not.toContain("sk-or-gizli4");
     expect(b.highlights).toHaveLength(1);
 
     await db.clearAll();
