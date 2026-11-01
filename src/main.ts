@@ -16,6 +16,7 @@ import { dateLong, num, percent, relative } from "./format";
 import { readingOrder } from "./geometry";
 import { editMark, editRect } from "./editor/transform";
 import { recognizeCanvas, recognizePage, stopOcr, type OcrPage } from "./ocr/ocr";
+import { analyzePage, subtractBoxes, type PageAnalysis } from "./ocr/detect";
 import { openHandwriting } from "./ui/handwriting";
 import { icon } from "./ui/icons";
 import { AudioBar } from "./audio/bar";
@@ -129,6 +130,14 @@ let marksByPage = new Map<number, Mark[]>();
 /** Taranmış sayfaların OCR sonucu (meta `ocr:<hash>`), sayfa → metin ve kelime kutuları. */
 let ocrPages = new Map<number, OcrPage>();
 let ocrRun: { stop: boolean } | null = null;
+/** Sayfa çözümlemesi (OCR gerekiyor mu?) — belge başına bellekte. */
+let analyzed = new Map<number, Promise<PageAnalysis>>();
+/** Otomatik OCR kuyruğu: görüntülenen sayfa ve komşuları. */
+let autoQueue: number[] = [];
+let autoSeen = new Set<number>();
+let autoBusy = false;
+let autoTimer = 0;
+let autoPill: HTMLElement | null = null;
 /** Tanınmış el yazısı (meta `hw:<hash>`): sayfa → kelimeler ve hangi çizimlerden tanındığı. */
 let hwPages = new Map<number, OcrPage & { sig: string }>();
 let hwRun: { stop: boolean } | null = null;
@@ -811,6 +820,10 @@ function closeReader(): void {
     ocrRun.stop = true;
     void stopOcr();
   }
+  autoQueue = [];
+  clearTimeout(autoTimer);
+  autoPill?.remove();
+  autoPill = null;
   review?.destroy();
   review = null;
   reader.editor?.destroy();
@@ -837,6 +850,9 @@ async function openReader(file: OpenDoc): Promise<void> {
   cards = await db.cardsFor(file.rec.hash);
   const savedOcr = (await db.getMeta<Record<string, OcrPage>>(`ocr:${file.rec.hash}`)) ?? {};
   ocrPages = new Map(Object.entries(savedOcr).map(([k, v]) => [Number(k), v]));
+  analyzed = new Map();
+  autoQueue = [];
+  autoSeen = new Set();
   recordings = await db.recordingsFor(file.rec.hash);
   const savedHw = (await db.getMeta<Record<string, OcrPage & { sig: string }>>(`hw:${file.rec.hash}`)) ?? {};
   hwPages = new Map(Object.entries(savedHw).map(([k, v]) => [Number(k), v]));
@@ -864,6 +880,10 @@ async function openReader(file: OpenDoc): Promise<void> {
     { label: "Metni tanıt (OCR): bu sayfa", run: () => void runOcr("page") },
     { label: "El yazısını tanı (aranabilir yap)", run: () => void runHandwriting(false) },
     { label: "Metni tanıt (OCR): tüm sayfalar", run: () => void runOcr("all") },
+    { label: `Otomatik metin tanıma: ${settings.autoOcr === false ? "kapalı" : "açık"}`, hint: "Resimdeki ve seçilemeyen yazılar", run: () => {
+      void changeSettings({ ...settings, autoOcr: settings.autoOcr === false });
+      if (settings.autoOcr !== false && reader) scheduleAutoOcr(reader.viewer.current);
+    } },
     "sep",
     { label: "Başka dosya aç", shortcut: "Ctrl O", run: () => void pickFile() },
     { label: "Son açılanlar", run: () => void goHome() },
@@ -1211,6 +1231,7 @@ function onPageChange(i: number): void {
   reader.panel.pageChanged(i);
   if (rightTab === "ai" && aiOn()) reader.ai.pageChanged();
   reader.file.rec.lastPage = i;
+  scheduleAutoOcr(i);
   clearTimeout(lastPageSave);
   lastPageSave = window.setTimeout(() => reader && void db.putFile({ ...reader.file.rec, lastOpened: Date.now() }), 600);
 }
@@ -1233,8 +1254,97 @@ async function textOf(i: number): Promise<string> {
   if (!reader) return "";
   const own = await pageText(reader.file.doc, i);
   const hw = hwPages.get(i)?.text;
-  const base = own.trim() ? own : ocrPages.get(i)?.text ?? "";
+  const ocr = ocrPages.get(i);
+  const base = !own.trim() || ocr?.mode === "garbled"
+    ? ocr?.text ?? own
+    : ocr?.mode === "extra" && ocr.text ? `${own}\n${ocr.text}` : own;
   return hw ? `${base}\n${hw}` : base;
+}
+
+/** Sayfa OCR'a muhtaç mı (metinsiz, bozuk metin, resimdeki yazı)? Sonuç belge açıkken saklanır. */
+function analysisOf(i: number): Promise<PageAnalysis> {
+  const doc = reader!.file.doc;
+  let a = analyzed.get(i);
+  if (!a) {
+    a = analyzePage(doc, i).catch(() => ({ need: "none" as const, boxes: [] }));
+    analyzed.set(i, a);
+  }
+  return a;
+}
+
+/** Sayfayı tanı; ihtiyaca göre: tam metin, bozuk metnin yerine ya da yalnız PDF metninde olmayan kelimeler. */
+async function ocrPageFor(i: number, onProgress?: (status: string, ratio: number) => void): Promise<OcrPage> {
+  const doc = reader!.file.doc;
+  const a = await analysisOf(i);
+  const raw = await recognizePage(doc, i, onProgress);
+  if (a.need === "extra") return { ...subtractBoxes(raw, a.boxes), mode: "extra" };
+  return { ...raw, mode: a.need === "garbled" ? "garbled" : "full" };
+}
+
+/** Sayfa değişince (kısa gecikmeyle) görünen sayfa ve komşuları otomatik tanıma kuyruğuna girer. */
+function scheduleAutoOcr(i: number): void {
+  clearTimeout(autoTimer);
+  if (settings.autoOcr === false) return;
+  autoTimer = window.setTimeout(() => {
+    if (!reader) return;
+    const n = reader.viewer.pageCount;
+    const near = [i, i + 1, i - 1, i + 2].filter((p) => p >= 0 && p < n && !ocrPages.has(p) && !autoSeen.has(p));
+    // En yakın sayfa önce: eski kuyruktaki uzak sayfalar sona kalır.
+    autoQueue = [...near, ...autoQueue.filter((p) => !near.includes(p))];
+    void pumpAutoOcr();
+  }, 700);
+}
+
+async function pumpAutoOcr(): Promise<void> {
+  if (autoBusy || ocrRun || !reader) return;
+  autoBusy = true;
+  const r = reader;
+  let found = 0;
+  try {
+    while (autoQueue.length && reader === r && !ocrRun && settings.autoOcr !== false) {
+      const i = autoQueue.shift()!;
+      if (autoSeen.has(i) || ocrPages.has(i)) continue;
+      autoSeen.add(i);
+      await new Promise<void>((res) => ((window as Window & { requestIdleCallback?: (f: () => void, o?: { timeout: number }) => void }).requestIdleCallback ?? ((f: () => void) => setTimeout(f, 200)))(() => res(), { timeout: 1500 }));
+      if (reader !== r) break;
+      const a = await analysisOf(i);
+      if (a.need === "none") continue;
+      // Bozuk metinli sayfada vurgu varsa katmanı değiştirme (vurgular eski metne bağlı).
+      if (a.need === "garbled" && byPage.get(i)?.length) continue;
+      showAutoPill(`Yazılar tanınıyor · s. ${num(i + 1)}`);
+      let page: OcrPage;
+      try {
+        page = await ocrPageFor(i, (st, ratio) => st.startsWith("loading") && showAutoPill(`Tanıma verisi yükleniyor… %${Math.round(ratio * 100)}`));
+      } catch (err) {
+        console.error(err);
+        break;
+      }
+      if (reader !== r || ocrRun) break;
+      if (!page.lines.length) continue;
+      ocrPages.set(i, page);
+      found++;
+      r.viewer.refreshText(i);
+      r.search.invalidate();
+      await db.putMeta(`ocr:${r.file.rec.hash}`, Object.fromEntries(ocrPages));
+    }
+  } finally {
+    autoBusy = false;
+    if (reader === r) {
+      autoPill?.remove();
+      autoPill = null;
+      // Taranmış belge uyarısı otomatik tanımadan sonra gereksiz.
+      if (found) r.band.querySelector("[data-scanned]")?.remove();
+    }
+  }
+}
+
+function showAutoPill(text: string): void {
+  if (!reader) return;
+  if (!autoPill) {
+    autoPill = h("div", { class: "cm-ocrpill", role: "status" }, h("span", { class: "cm-ocrpill__dot", "aria-hidden": "true" }), h("span", {}));
+    document.body.append(autoPill);
+  }
+  (autoPill.lastChild as HTMLElement).textContent = text;
 }
 
 /**
@@ -1251,12 +1361,11 @@ async function runOcr(scope: "page" | "all"): Promise<void> {
   const candidates = scope === "page" ? [r.viewer.current] : [...Array(doc.numPages).keys()];
   for (const i of candidates) {
     if (ocrPages.has(i)) continue;
-    if ((await pageText(doc, i)).trim()) continue;
-    pages.push(i);
+    if ((await analysisOf(i)).need !== "none") pages.push(i);
   }
   if (!pages.length) {
     ocrRun = null;
-    toast(scope === "page" ? "Bu sayfanın metni zaten seçilebilir." : "Tanınacak sayfa yok: bütün sayfaların metni var.");
+    toast(scope === "page" ? "Bu sayfadaki yazının tamamı zaten seçilebilir." : "Tanınacak sayfa yok: bütün sayfaların yazısı seçilebilir.");
     return;
   }
   const title = h("p", { class: "cm-notice__title", text: "Metin tanınıyor (OCR)…" });
@@ -1279,7 +1388,7 @@ async function runOcr(scope: "page" | "all"): Promise<void> {
     if (run.stop || reader !== r) break;
     title.textContent = `Metin tanınıyor: sayfa ${num(i + 1)} (${num(done + 1)}/${num(pages.length)})`;
     try {
-      const page = await recognizePage(doc, i, (status, ratio) => {
+      const page = await ocrPageFor(i, (status, ratio) => {
         if (status.startsWith("loading")) detail.textContent = `Tanıma verisi yükleniyor… %${Math.round(ratio * 100)}`;
         else if (status.startsWith("recognizing")) detail.textContent = `Sayfa okunuyor… %${Math.round(ratio * 100)}`;
       });
@@ -1584,7 +1693,7 @@ function showScannedBand(): void {
   if (!reader) return;
   const r = reader;
   r.band.replaceChildren(
-    h("div", { class: "cm-notice cm-notice--warn", role: "status" },
+    h("div", { class: "cm-notice cm-notice--warn", role: "status", "data-scanned": "" },
       h("span", { class: "cm-notice__sym", "aria-hidden": "true", text: "!" }),
       h("div", {},
         h("p", { class: "cm-notice__title", text: "Bu dosyada seçilebilir metin yok" }),

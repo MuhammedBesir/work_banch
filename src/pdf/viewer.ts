@@ -471,9 +471,10 @@ export class Viewer {
       return;
     }
     if (this.destroyed || p.textLayer !== tl) return;
-    if (!text.textContent?.trim()) {
-      const ocr = this.ocrFor(p.index);
-      if (ocr) buildOcrLayer(text, ocr, vp.width, vp.height);
+    const ocr = this.ocrFor(p.index);
+    if (ocr) {
+      if (!text.textContent?.trim() || ocr.mode === "garbled") buildOcrLayer(text, ocr, vp.width, vp.height);
+      else if (ocr.mode === "extra") buildOcrLayer(text, ocr, vp.width, vp.height, "ocr");
     }
     const hw = this.hwFor(p.index);
     if (hw) buildOcrLayer(text, hw, vp.width, vp.height, true);

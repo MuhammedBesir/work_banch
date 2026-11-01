@@ -186,6 +186,8 @@ export interface Settings {
   homeView?: "list" | "grid";
   /** Ses kaydı sırasında tarayıcının konuşma tanımasıyla canlı yazıya dökme (Chrome'da ses Google'a gider). */
   liveTranscribe?: boolean;
+  /** Görüntülenen sayfalarda metni eksik/bozuk ya da resim içindeki yazıyı arka planda tanı (varsayılan açık). */
+  autoOcr?: boolean;
 }
 
 export const DEFAULT_NAMES: Record<Color, string> = {

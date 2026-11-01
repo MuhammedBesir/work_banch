@@ -13,6 +13,8 @@ export interface OcrPage {
   lines: OcrWord[][];
   text: string;
   confidence: number;
+  /** full: metinsiz sayfa; garbled: PDF metni bozuk, OCR yerine geçer; extra: PDF metnine eklenen (resimdeki) yazı. */
+  mode?: "full" | "garbled" | "extra";
 }
 
 type TWorker = Awaited<ReturnType<typeof import("tesseract.js")["createWorker"]>>;
@@ -110,7 +112,7 @@ export async function stopOcr(): Promise<void> {
  * OCR metin katmanı: pdf.js metin katmanıyla aynı yapı (saydam yazı, mutlak konum, satır sonunda <br>),
  * böylece seçim, vurgu, arama ve AI kapsamı taranmış sayfada da çalışır.
  */
-export function buildOcrLayer(container: HTMLElement, ocr: OcrPage, width: number, height: number, append = false): void {
+export function buildOcrLayer(container: HTMLElement, ocr: OcrPage, width: number, height: number, append: boolean | "ocr" = false): void {
   const ctx = document.createElement("canvas").getContext("2d")!;
   const frag = document.createDocumentFragment();
   for (const line of ocr.lines) {
@@ -125,7 +127,7 @@ export function buildOcrLayer(container: HTMLElement, ocr: OcrPage, width: numbe
       const measured = ctx.measureText(text).width || 1;
       const span = document.createElement("span");
       span.textContent = text;
-      if (append) span.className = "is-hw";
+      if (append) span.className = append === "ocr" ? "is-ocrx" : "is-hw";
       span.style.cssText = `left:${x0 * width}px;top:${y0 * height}px;font-size:${fs}px;font-family:sans-serif;transform:scaleX(${((right - x0) * width) / measured})`;
       frag.append(span);
     });
