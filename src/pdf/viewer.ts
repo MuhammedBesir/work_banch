@@ -43,6 +43,7 @@ interface PageView {
 
 const GAP = 24; // space-6: PDF sayfaları arası
 const PAD_X = 48; // space-12: sayfa kenarı ile okuma alanı arası
+const PAD_X_NARROW = 10; // telefonda sayfa ekranı doldursun
 const RENDER_AROUND = 2; // görünen sayfa ±2 çizilir
 const KEEP_AROUND = 5; // bundan uzak sayfaların canvas'ı bırakılır
 export const ZOOM_MIN = 0.5;
@@ -179,7 +180,7 @@ export class Viewer {
   private fitScale(): void {
     if (this.zoomMode === "custom") return;
     // Palet için ayrılan boşluk iki yandan eşit: sayfa ortada kalır.
-    const availW = Math.max(200, this.stage.clientWidth - PAD_X * 2 - this.reserveLeft * 2);
+    const availW = Math.max(200, this.stage.clientWidth - this.padX * 2 - this.reserveLeft * 2);
     const availH = Math.max(200, this.stage.clientHeight - GAP * 2);
     const ref = this.pages[this.current] ?? this.pages[0];
     const byWidth = availW / this.maxWidth();
@@ -199,8 +200,8 @@ export class Viewer {
       y += hgt + GAP;
     }
     // En az sahne genişliği (sayfa ortada kalsın), sayfa daha genişse yatay kaydırma için onun kadar.
-    this.root.style.minWidth = `max(100%, ${Math.round(this.maxWidth() * this.scale) + PAD_X * 2 + this.reserveLeft * 2}px)`;
-    this.root.style.paddingLeft = this.root.style.paddingRight = this.reserveLeft ? `${PAD_X + this.reserveLeft}px` : "";
+    this.root.style.minWidth = `max(100%, ${Math.round(this.maxWidth() * this.scale) + this.padX * 2 + this.reserveLeft * 2}px)`;
+    this.root.style.paddingLeft = this.root.style.paddingRight = `${this.padX + this.reserveLeft}px`;
     this.root.style.setProperty("--z", String(this.scale)); // Yaz modu katmanı zoom ile ölçeklenir
     this.root.classList.toggle("is-paged", this.scrollMode === "paged");
     for (const p of this.pages) this.drawHighlights(p.index);
@@ -255,6 +256,10 @@ export class Viewer {
 
   /** Soldan ayrılan boşluk (Yaz modu paleti sayfanın üstüne binmesin). */
   private reserveLeft = 0;
+  /** Dar ekranda (telefon) kenar boşluğu küçük. */
+  private get padX(): number {
+    return this.stage.clientWidth < 640 ? PAD_X_NARROW : PAD_X;
+  }
   setReserveLeft(px: number): void {
     if (px === this.reserveLeft) return;
     this.reserveLeft = px;

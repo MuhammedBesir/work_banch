@@ -1,6 +1,7 @@
 import { fold, num, relative } from "../format";
 import type { FileRecord } from "../types";
 import { h, kbd } from "../util";
+import { icon } from "./icons";
 import { openMenu, type MenuItem } from "./menu";
 
 export const TRUST = "Dosyan bilgisayarından çıkmaz; açma, okuma ve vurgular tamamen bu tarayıcıda işlenir.";
@@ -47,7 +48,7 @@ export class Home {
     this.dropSlot = h("div", { style: "display:contents" }, this.drop);
     this.recent = h("section", { class: "cm-recent", "aria-labelledby": "recent-h" });
     const bar = h("header", { class: "cm-bar" },
-      h("span", { class: "cm-bar__brand", text: "Çalışma Masası" }),
+      h("span", { class: "cm-bar__brand" }, h("img", { class: "cm-bar__logo", src: "./icon.svg", alt: "", width: 22, height: 22 }), "Çalışma Masası"),
       h("span", { class: "cm-bar__spacer" }),
       h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm", onclick: () => actions.settings() }, "Ayarlar"),
     );
@@ -58,15 +59,17 @@ export class Home {
   showIdle(): void {
     this.drop.className = "cm-drop";
     this.drop.replaceChildren(
+      h("div", { class: "cm-drop__icon", "aria-hidden": "true" }, icon("upload")),
       h("h1", { class: "cm-display", text: "PDF'ini buraya bırak" }),
       h("p", { class: "cm-muted", style: "margin:0", text: "Ders slaytları, kitap bölümleri, çıkmış sorular. Bir seferde bir dosya." }),
-      h("div", { style: "display:flex;gap:12px;align-items:center;margin-top:8px;flex-wrap:wrap;justify-content:center" },
-        h("button", { class: "cm-btn cm-btn--primary", onclick: () => this.actions.pick() }, "Dosya seç"),
-        h("span", { class: "cm-muted" }, kbd("Ctrl O")),
-        h("button", { class: "cm-btn", onclick: () => this.actions.newNotebook() }, "Yeni not defteri"),
-        h("button", { class: "cm-btn cm-btn--ghost", onclick: () => this.actions.importBundle() }, "Paylaşım paketi aç"),
+      h("div", { class: "cm-drop__actions" },
+        h("button", { class: "cm-btn cm-btn--primary cm-btn--lg", title: "Dosya seç (Ctrl O)", onclick: () => this.actions.pick() }, "Dosya seç ", kbd("Ctrl O")),
       ),
-      h("p", { class: "cm-trust", style: "margin:16px 0 0", text: TRUST }),
+      h("div", { class: "cm-drop__alt" },
+        h("button", { class: "cm-drop__link", onclick: () => this.actions.newNotebook() }, icon("notebook"), "Yeni not defteri"),
+        h("button", { class: "cm-drop__link", onclick: () => this.actions.importBundle() }, icon("package"), "Paylaşım paketi aç"),
+      ),
+      h("p", { class: "cm-trust cm-drop__trust", text: TRUST }),
     );
     this.dropSlot.replaceChildren(this.drop);
   }
@@ -128,8 +131,9 @@ export class Home {
 
   renderRecent(rows: RecentRow[]): void {
     this.rows = rows;
-    const foot = h("p", { class: "cm-muted", style: "font-size:12px;line-height:16px;margin-top:12px", text: "Vurgular bu tarayıcıda saklanır. Tarayıcı verilerini silersen kaybolur; düzenli olarak yedek al ya da Markdown'a aktar." });
+    const foot = h("p", { class: "cm-muted cm-recent__foot", text: "Vurgular bu tarayıcıda saklanır. Tarayıcı verilerini silersen kaybolur; düzenli olarak yedek al ya da Markdown'a aktar." });
     if (!rows.length) {
+      foot.classList.add("is-alone");
       this.recent.replaceChildren(foot);
       return;
     }
@@ -156,7 +160,9 @@ export class Home {
       again?.focus();
       if (at !== null) again?.setSelectionRange(at, at);
     });
-    const filters = h("div", { class: "cm-recent__filters", role: "group", "aria-label": "Klasör ve etiket" },
+    // Klasör, etiket ya da sabitlenen yoksa filtre satırı gösterilmez (tek başına "Tümü" anlamsız).
+    const hasFilters = folders.length || tags.length || rows.some((r) => r.rec.pinned);
+    const filters = !hasFilters ? null : h("div", { class: "cm-recent__filters", role: "group", "aria-label": "Klasör ve etiket" },
       chip("Tümü", this.folder === "*", () => ((this.folder = "*"), this.renderRecent(this.rows))),
       rows.some((r) => r.rec.pinned) ? chip("★ Sabitlenenler", this.folder === "pinned", () => ((this.folder = "pinned"), this.renderRecent(this.rows))) : null,
       ...folders.map((f) => chip(`▸ ${f}`, this.folder === f, () => ((this.folder = f), this.renderRecent(this.rows)))),
@@ -176,7 +182,7 @@ export class Home {
         h("div", { style: "display:flex;gap:8px;align-items:center" }, search, view,
           h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm", onclick: () => this.actions.clearRecent() }, "Listeyi temizle")),
       ),
-      filters,
+      ...(filters ? [filters] : []),
       content,
       foot,
     );

@@ -3,6 +3,7 @@ import { num } from "../format";
 import { openPdf } from "../pdf/load";
 import { h, isTyping, kbd, sha256 } from "../util";
 import { openMenu } from "../ui/menu";
+import { icon } from "../ui/icons";
 import { toast } from "../ui/toast";
 import type { EditPage, OutlineNode, Source } from "./build";
 import { openDialog } from "../ui/dialog";
@@ -57,25 +58,26 @@ export class PageEditor {
       { label: "Kareli sayfa", hint: "işlem, grafik", run: () => this.insertBlank("grid") },
       { label: "Başka PDF'ten sayfalar…", run: () => this.pickOther() },
     ], "right"));
-    const marginBtn = h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm", "aria-haspopup": "menu" }, "Not alanı ▾");
+    const marginBtn = h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--withicon", "aria-haspopup": "menu", title: "Sayfanın sağına not alanı ekle" }, icon("margin"), "Not alanı");
     marginBtn.addEventListener("click", () => openMenu(marginBtn, [
       { label: "Yok", run: () => this.setMargin(0) },
       { label: "Sağa %25", hint: "kenar notları", run: () => this.setMargin(0.25) },
       { label: "Sağa %50", hint: "geniş not alanı", run: () => this.setMargin(0.5) },
     ]));
-    const action = (label: string, key: string | null, run: () => void, danger = false) =>
-      h("button", { class: `cm-btn cm-btn--ghost cm-btn--sm${danger ? " cm-btn--danger" : ""}`, onclick: run }, label, key ? " " : "", key ? kbd(key) : null);
+    // Simgeli düğmeler; kısayol ipucunda (araç çubuğu kısayol kutucuklarıyla kalabalıklaşmasın).
+    const action = (name: string, label: string, key: string | null, run: () => void, danger = false) =>
+      h("button", { class: `cm-btn cm-btn--ghost cm-btn--sm cm-btn--withicon${danger ? " cm-btn--danger" : ""}`, title: key ? `${label} (${key})` : label, onclick: run }, icon(name), label);
     const bar = h("div", { class: "cm-actionbar", role: "toolbar", "aria-label": "Sayfa işlemleri" },
       this.selInfo, h("span", { class: "cm-bar__sep" }),
-      action("Döndür", "R", () => this.rotate()),
-      action("Kırp…", "K", () => this.openCrop()),
+      action("rotate", "Döndür", "R", () => this.rotate()),
+      action("crop", "Kırp", "K", () => this.openCrop()),
       marginBtn,
-      action("Çoğalt", "Ctrl D", () => this.duplicate()),
-      action("Sil", "Del", () => this.remove(), true),
-      action("Ayrı PDF olarak kaydet", null, () => void this.save(true)),
+      action("copy", "Çoğalt", "Ctrl D", () => this.duplicate()),
+      action("trash", "Sil", "Del", () => this.remove(), true),
+      action("split", "Ayrı PDF", null, () => void this.save(true)),
       h("span", { class: "cm-bar__spacer" }),
       addBtn,
-      h("button", { class: "cm-btn cm-btn--sm", onclick: () => this.pickOther() }, "Başka PDF ekle"),
+      h("button", { class: "cm-btn cm-btn--sm cm-btn--withicon", onclick: () => this.pickOther() }, icon("merge"), "Başka PDF ekle"),
     );
     this.dropline = h("span", { class: "cm-dropline", "aria-hidden": "true", hidden: true });
     this.grid = h("div", { class: "cm-grid", role: "listbox", "aria-multiselectable": "true", "aria-label": "Sayfalar, sürükleyerek sırala", tabindex: "-1" });

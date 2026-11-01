@@ -525,7 +525,7 @@ label.cm-field { cursor: pointer; }
 .cm-ai__imgopt { display: inline-flex; gap: 4px; align-items: center; margin-left: 8px; font-size: 12px; color: var(--ink-muted); }
 
 /* ---------- Quiz (son sayfanın altında) ---------- */
-.cm-quizzes { width: min(860px, 100%); margin: var(--space-4) auto var(--space-12); display: flex; flex-direction: column; gap: var(--space-4); font-family: var(--font-sans); color: var(--ink); }
+.cm-quizzes { contain: inline-size; width: min(860px, 100%); margin: var(--space-4) auto var(--space-12); display: flex; flex-direction: column; gap: var(--space-4); font-family: var(--font-sans); color: var(--ink); }
 .cm-quizzes__head { display: flex; justify-content: space-between; align-items: center; gap: var(--space-4); flex-wrap: wrap; padding: var(--space-4) var(--space-5, 20px); background: var(--surface-raised); border: 1px dashed var(--line-strong); border-radius: 14px; }
 .cm-quizzes__title { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; font: 600 18px/24px var(--font-serif, serif); }
 .cm-quizzes__busy { margin: 0; text-align: center; }
@@ -641,3 +641,49 @@ label.cm-field { cursor: pointer; }
 .cm-page { contain: layout style; }
 /* Ekran dışındaki küçük sayfalar çizilmez ve yerleşime katılmaz; boyutları hatırlanır. */
 .cm-thumb { content-visibility: auto; contain-intrinsic-size: auto 72px auto 112px; }
+
+/* ---------- Ana ekran ---------- */
+.cm-bar__brand { display: inline-flex; align-items: center; gap: 8px; }
+.cm-bar__logo { width: 22px; height: 22px; border-radius: 6px; }
+.cm-home > div > .cm-drop, .cm-drop { border-width: 1.5px; border-radius: 20px; padding: 44px 32px 28px; gap: 10px; background: var(--surface-raised); box-shadow: 0 1px 2px rgba(31, 29, 26, .05); }
+.cm-drop__icon { width: 56px; height: 56px; display: grid; place-items: center; border-radius: 16px; background: var(--accent-soft); color: var(--accent); margin-bottom: 4px; }
+.cm-drop__icon .cm-icon { width: 28px; height: 28px; stroke-width: 1.7; }
+.cm-drop__actions { margin-top: 10px; }
+.cm-btn--lg { min-height: 42px; padding: 0 20px; font-size: 15px; border-radius: 10px; gap: 10px; display: inline-flex; align-items: center; }
+.cm-btn--primary .cm-kbd { background: rgba(255,255,255,.16); color: inherit; border-color: rgba(255,255,255,.35); }
+.cm-drop__alt { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+.cm-drop__link { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font: 500 13.5px/18px var(--font-sans); cursor: pointer; }
+.cm-drop__link:hover { background: var(--paper); color: var(--accent); }
+.cm-drop__link .cm-icon { width: 17px; height: 17px; color: var(--ink-muted); }
+.cm-drop__link:hover .cm-icon { color: var(--accent); }
+.cm-drop__trust { margin: 14px 0 0; padding-top: 14px; border-top: 1px solid var(--line); font-size: 12.5px; }
+.cm-drop.is-over .cm-drop__icon { transform: translateY(-2px); transition: transform 150ms; }
+
+/* ---------- İşaretler paneli: ince filtre hapları ---------- */
+.cm-panel .cm-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.cm-panel .cm-chip { min-height: 26px; padding: 0 9px; border: 0; border-radius: 999px; background: var(--paper); font-size: 12px; gap: 5px; transition: background-color 120ms, box-shadow 120ms; }
+.cm-panel .cm-chip:hover { background: color-mix(in srgb, var(--accent) 10%, var(--paper)); }
+.cm-panel .cm-chip.is-on { background: var(--accent-soft); box-shadow: inset 0 0 0 1.5px var(--accent); color: var(--ink); }
+.cm-panel .cm-chip .cm-num { font-size: 10.5px; }
+.cm-panel .cm-chip .cm-mk, .cm-panel .cm-chip svg { transform: scale(.9); }
+.cm-panel__head { gap: 8px; }
+.cm-panel .cm-input { min-height: 34px; border-radius: 10px; }
+/* Liste satırları: seçilen satır sol kenar çizgisiyle, arka plan hafif. */
+.cm-panel .cm-item { border-radius: 10px; margin: 2px 6px; border-bottom: 0; }
+.cm-panel .cm-item.is-selected { box-shadow: inset 3px 0 0 var(--accent); }
+.cm-panel__foot { font-size: 12px; }
+
+/* ---------- Düzenle modu ---------- */
+.cm-actionbar .cm-btn--withicon .cm-icon { width: 17px; height: 17px; }
+/* Seçim kutusu sayfanın başlığının üstüne binmesin: kartın köşesinde, sayfanın dışında yuvarlak rozet. */
+.cm-pcard { position: relative; }
+.cm-pcard__check { top: -8px !important; left: -8px !important; opacity: 0; transition: opacity 120ms; }
+.cm-pcard:hover .cm-pcard__check, .cm-pcard.is-selected .cm-pcard__check, .cm-grid:has(.cm-pcard.is-selected) .cm-pcard__check { opacity: 1; }
+.cm-pcard__check .cm-check { width: 20px; height: 20px; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+@media (hover: none) { .cm-pcard__check { opacity: 1; } }
+.cm-recent__foot { font-size: 12px; line-height: 16px; margin: 12px 0 0; }
+.cm-recent__foot.is-alone { text-align: center; max-width: 520px; margin: 0 auto; }
+/* Dokunmatik ekranda klavye kısayolu kutucukları gereksiz. */
+@media (hover: none) and (pointer: coarse) {
+  .cm-drop .cm-kbd, .cm-panel__foot .cm-kbd, .cm-ai__hint { display: none; }
+}
