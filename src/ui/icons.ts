@@ -42,6 +42,8 @@ const PATHS: Record<string, string> = {
   send: "M3.5 10L16.5 4l-4.5 12.5-2.5-5zM10 11.5l6.5-7.5",
   stop: "M6 6h8v8H6z",
   chev: "M6 8l4 4 4-4",
+  pages: "M3.5 3.5h5v6h-5zM11.5 3.5h5v6h-5zM3.5 12h5v5h-5zM11.5 12h5v5h-5z",
+  toc: "M4 5h1.5M8 5h8M4 10h1.5M8 10h8M4 15h1.5M8 15h8",
   doc: "M5 2.5h7l3 3v12H5zM12 2.5v3h3M7.5 9h5M7.5 12h5M7.5 15h3",
   bolt: "M11 2.5L4.5 11h5l-1 6.5 7-9h-5z",
   download: "M10 3v10M6 9l4 4 4-4M4 16.5h12",
@@ -55,6 +57,7 @@ const PATHS: Record<string, string> = {
   split: "M4 3.5h7l3 3v10H4zM11 3.5v3h3M7 11h4M9 9v4",
   plus: "M10 4v12M4 10h12",
   merge: "M3 3.5h6v8H3zM11 8.5h6v8h-6zM6 11.5v3h5",
+  back: "M12 4l-6 6 6 6",
   quiz: "M4 3h12v14H4zM7 7h6M7 10.5h6M7 14h3",
   // üst çubuk
   search: "M8.5 3.5a5 5 0 110 10 5 5 0 010-10zM12.2 12.2L16.5 16.5",

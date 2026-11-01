@@ -1,6 +1,7 @@
 import type { Color } from "../types";
 import { COLORS } from "../types";
 import { h, kbd, marker } from "../util";
+import { icon } from "./icons";
 
 export interface FloatActions {
   color(c: Color): void;
@@ -62,13 +63,13 @@ export class FloatBar {
         return b;
       }),
       h("span", { class: "cm-float__sep" }),
-      h("button", { class: "cm-float__act", tabindex: "-1", onclick: () => this.actions.note() }, "Not ekle ", kbd("N")),
-      h("button", { class: "cm-float__act", tabindex: "-1", onclick: () => this.actions.copy() }, "Kopyala ", kbd("C")),
+      h("button", { class: "cm-float__act", tabindex: "-1", "aria-label": "Not ekle", onclick: () => this.actions.note() }, icon("sticky"), h("span", { text: "Not" }), kbd("N")),
+      h("button", { class: "cm-float__act", tabindex: "-1", "aria-label": "Kopyala", onclick: () => this.actions.copy() }, icon("copy"), h("span", { text: "Kopyala" }), kbd("C")),
       ...(ai && this.actions.ask
-        ? [h("span", { class: "cm-float__sep" }), h("button", { class: "cm-float__act", tabindex: "-1", onclick: () => this.actions.ask!() }, "Sor ", kbd("A"))]
+        ? [h("span", { class: "cm-float__sep" }), h("button", { class: "cm-float__act", tabindex: "-1", "aria-label": "Yapay zekaya sor", onclick: () => this.actions.ask!() }, icon("sparkle"), h("span", { text: "Sor" }), kbd("A"))]
         : []),
       ...(mode === "applied"
-        ? [h("span", { class: "cm-float__sep" }), h("button", { class: "cm-float__act cm-float__act--danger", tabindex: "-1", onclick: () => this.actions.remove() }, "Sil ", kbd("Del"))]
+        ? [h("span", { class: "cm-float__sep" }), h("button", { class: "cm-float__act cm-float__act--danger", tabindex: "-1", "aria-label": "Vurguyu sil", onclick: () => this.actions.remove() }, icon("trash"), h("span", { text: "Sil" }), kbd("Del"))]
         : []),
     );
     (this.bar.querySelector("button") as HTMLButtonElement).tabIndex = 0;

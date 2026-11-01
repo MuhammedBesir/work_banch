@@ -2,6 +2,7 @@ import { num } from "../format";
 import { segment } from "../ai/prompt";
 import type { Card, Color, Highlight } from "../types";
 import { COLORS } from "../types";
+import { icon } from "../ui/icons";
 import { h, kbd, marker } from "../util";
 import { toast } from "../ui/toast";
 import { deck, dueCards, nextLabel, schedule, type Grade } from "./srs";
@@ -43,7 +44,7 @@ export class ReviewScreen {
     this.chips = h("div", { class: "cm-chips", role: "group", "aria-label": "Deste" });
     this.counter = h("span", { class: "cm-num" });
     const bar = h("header", { class: "cm-bar", role: "toolbar", "aria-label": "Tekrar" },
-      h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm", onclick: () => actions.exit() }, "‹ Belgeye dön ", kbd("Esc")),
+      h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--withicon", title: "Belgeye dön (Esc)", onclick: () => actions.exit() }, icon("back"), "Belgeye dön"),
       h("span", { class: "cm-bar__brand", text: `Tekrar · ${title}` }),
       h("span", { class: "cm-bar__spacer" }),
       this.chips,
@@ -121,15 +122,16 @@ export class ReviewScreen {
     this.counter.textContent = total ? `${num(Math.min(this.done, total))} / ${num(total)} · ${this.cram ? "tümü" : "bugün"}` : "";
     const card = this.queue[this.index];
     if (!card) return this.renderEmpty();
-    const progress = h("div", { class: "cm-progress", role: "progressbar", "aria-valuenow": this.done, "aria-valuemax": total, "aria-label": "Bugünkü kartlar" }, h("div"));
-    (progress.firstChild as HTMLElement).style.width = `${(this.done / Math.max(1, total)) * 100}%`;
+    const bar = h("div", { class: "cm-progress", role: "progressbar", "aria-valuenow": this.done, "aria-valuemax": total, "aria-label": "Bugünkü kartlar" }, h("div"));
+    (bar.firstChild as HTMLElement).style.width = `${(this.done / Math.max(1, total)) * 100}%`;
+    const progress = h("div", { class: "cm-review__progress" }, bar, h("span", { class: "cm-num", text: `${num(Math.min(this.done + 1, total))} / ${num(total)}` }));
     const src = h("div", { class: "cm-card__src" },
       card.color ? marker(card.color) : h("span", { class: "cm-kind", text: "AI" }),
       h("span", { text: `${card.color ? this.names[card.color] : "AI kartı"} · s. ${num(card.page + 1)}` }),
       h("span", { text: "·" }),
       h("span", { text: card.source === "ai" ? "AI önerisi, senin onayınla" : "vurgundan otomatik" }),
     );
-    const article = h("article", { class: "cm-card", "aria-label": "Kart", tabindex: "-1" }, src);
+    const article = h("article", { class: `cm-card${card.color ? ` cm-card--c${card.color}` : " cm-card--ai"}${this.revealed ? " is-revealed" : ""}`, "aria-label": "Kart", tabindex: "-1" }, src);
     if (this.editing) {
       const front = h("textarea", { class: "cm-input cm-card__edit", rows: 2, "aria-label": "Ön yüz", "data-autofocus": "" });
       const back = h("textarea", { class: "cm-input cm-card__edit", rows: 4, "aria-label": "Arka yüz" });
@@ -165,15 +167,16 @@ export class ReviewScreen {
         if (card.note) article.append(h("div", { class: "cm-card__src", style: "margin-top:auto" }, h("span", { text: `Notun: ${card.note}` })));
       }
     }
+    // Not düğmeleri renkli: kırmızı bilemedim, sarı zorlandım, yeşil bildim; altında bir sonraki tekrar.
     const grade = (g: Grade, label: string) =>
-      h("button", { class: "cm-btn", disabled: !this.revealed || this.editing, onclick: () => this.grade(g), "data-autofocus": this.revealed && g === 3 ? "" : undefined },
-        h("span", {}, `${label} `, kbd(String(g))), h("span", { class: "cm-num cm-muted", text: nextLabel(card, g) }));
-    const reveal = h("button", { class: "cm-btn cm-btn--primary", onclick: () => this.reveal(), "data-autofocus": this.revealed ? undefined : "" }, "Cevabı göster ", kbd("Space"));
+      h("button", { class: `cm-grade__btn cm-grade__btn--${g}`, disabled: !this.revealed || this.editing, onclick: () => this.grade(g), "data-autofocus": this.revealed && g === 3 ? "" : undefined },
+        h("span", { class: "cm-grade__label" }, label, kbd(String(g))), h("span", { class: "cm-num cm-grade__next", text: nextLabel(card, g) }));
+    const reveal = h("button", { class: "cm-btn cm-btn--primary cm-btn--lg", onclick: () => this.reveal(), "data-autofocus": this.revealed ? undefined : "" }, "Cevabı göster ", kbd("Space"));
     this.main.replaceChildren(
       progress,
       article,
       this.revealed ? h("div", { class: "cm-grade", role: "group", "aria-label": "Ne kadar hatırladın" }, grade(1, "Bilemedim"), grade(2, "Zorlandım"), grade(3, "Bildim")) : reveal,
-      h("p", { class: "cm-muted", style: "margin:0;font-size:13px" }, "Cevap ", kbd("Space"), " · Kaynağa git ", kbd("G"), " · Kartı düzenle ", kbd("E")),
+      h("p", { class: "cm-review__hint" }, "Cevap ", kbd("Space"), " · Kaynağa git ", kbd("G"), " · Kartı düzenle ", kbd("E")),
     );
     requestAnimationFrame(() => this.focus());
   }

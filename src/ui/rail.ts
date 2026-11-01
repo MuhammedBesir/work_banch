@@ -4,6 +4,7 @@ import type { OutlineItem } from "../pdf/load";
 import type { Color, Mark } from "../types";
 import { drawingsSvg } from "../write/layer";
 import { h, marker } from "../util";
+import { icon } from "./icons";
 
 export interface RailActions {
   goTo(page: number): void;
@@ -29,8 +30,8 @@ export class Rail {
     this.thumbs = h("div", { class: "cm-rail__thumbs" });
     this.outlineEl = h("div", { class: "cm-outline", hidden: true });
     this.tabs = [
-      h("button", { class: "cm-tab is-on", "aria-pressed": "true", onclick: () => this.setTab("pages") }, "Sayfalar"),
-      h("button", { class: "cm-tab", "aria-pressed": "false", onclick: () => this.setTab("toc") }, "İçindekiler"),
+      h("button", { class: "cm-tab is-on", "aria-pressed": "true", title: "Sayfalar", onclick: () => this.setTab("pages") }, icon("pages"), h("span", { class: "cm-tab__t", text: "Sayfalar" })),
+      h("button", { class: "cm-tab", "aria-pressed": "false", title: "İçindekiler", onclick: () => this.setTab("toc") }, icon("toc"), h("span", { class: "cm-tab__t", text: "İçindekiler" })),
     ];
     this.el = h("nav", { class: "cm-rail", "aria-label": "Sayfa önizlemeleri ve içindekiler" },
       h("div", { class: "cm-rail__tabs" }, ...this.tabs), this.thumbs, this.outlineEl);
