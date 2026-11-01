@@ -131,6 +131,8 @@ export class Home {
 
   renderRecent(rows: RecentRow[]): void {
     this.rows = rows;
+    // Dosya varken bırakma alanı tek satırlık kompakt karta dönüşür; liste öne çıkar.
+    this.recent.parentElement?.classList.toggle("has-recent", rows.length > 0);
     const foot = h("p", { class: "cm-muted cm-recent__foot", text: "Vurgular bu tarayıcıda saklanır. Tarayıcı verilerini silersen kaybolur; düzenli olarak yedek al ya da Markdown'a aktar." });
     if (!rows.length) {
       foot.classList.add("is-alone");

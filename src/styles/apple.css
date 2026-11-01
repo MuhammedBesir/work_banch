@@ -212,3 +212,75 @@ body { letter-spacing: -0.01em; text-rendering: optimizeLegibility; }
 .cm-panel .cm-chip.is-on .cm-num, .cm-review-screen .cm-chip.is-on .cm-num { color: color-mix(in srgb, var(--paper) 72%, transparent); }
 /* Mobil alt gezinme: saç teli ve buzlu cam. */
 .cm-mnav { background: var(--glass); backdrop-filter: saturate(180%) blur(20px); -webkit-backdrop-filter: saturate(180%) blur(20px); border-top: 0.5px solid var(--line-strong); }
+
+/* ==========================================================================
+   2. tur: liste kartı, küçük resimler, AI kutusu, panel öğeleri
+   ========================================================================== */
+
+/* Son açılanlar: iOS "inset grouped" liste — yuvarlak beyaz kart, satırlar arasında saç teli. */
+.cm-recent__head h2 { font-size: 22px; line-height: 28px; font-weight: 700; }
+.cm-table-wrap { background: var(--surface-raised); border-radius: var(--radius-lg); box-shadow: var(--shadow-sheet); overflow: hidden; }
+.cm-table th { background: var(--surface); color: var(--ink-muted); font-weight: 600; text-transform: none; letter-spacing: 0; font-size: 12px; padding: 8px 16px; }
+.cm-table td { padding: 12px 16px; }
+.cm-table tr:last-child td { border-bottom: 0; }
+.cm-table tr:hover td { background: color-mix(in srgb, var(--fill) 50%, transparent); }
+.cm-recent__search { border-radius: 9px; background: var(--fill); border-color: transparent; }
+.cm-recent__search:focus { background: var(--surface-raised); }
+
+/* Kapak ızgarası: yumuşak gölgeli, yuvarlak kapaklar. */
+.cm-cover__img, .cm-cover__thumb, .cm-cover > button:first-child { border-radius: 10px; }
+
+/* Kenar çubuğu ve düzenleyici sayfa küçük resimleri: kenarlık yerine gölge, seçim halkası. */
+.cm-thumb__page { border: 0; border-radius: 4px; box-shadow: var(--shadow-sheet); transition: box-shadow .15s var(--ease), transform .15s var(--ease); }
+.cm-thumb:hover .cm-thumb__page { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0, 0, 0, .1), 0 0 0 0.5px rgba(0, 0, 0, .08); }
+.cm-thumb.is-current .cm-thumb__page { border: 0; box-shadow: 0 0 0 2.5px var(--accent), 0 4px 12px rgba(0, 0, 0, .1); }
+.cm-thumb .cm-num { color: var(--ink-muted); font-size: 11px; }
+.cm-thumb.is-current .cm-num { color: var(--accent); font-weight: 600; }
+.cm-pcard__page { border-radius: 4px; transition: box-shadow .15s var(--ease), transform .15s var(--ease); }
+.cm-pcard:hover .cm-pcard__page { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0, 0, 0, .12), 0 0 0 0.5px rgba(0, 0, 0, .08); }
+.cm-pcard.is-selected .cm-pcard__page { outline: 0; box-shadow: 0 0 0 3px var(--accent), 0 8px 20px rgba(0, 0, 0, .12); }
+.cm-pcard.is-selected:focus-visible .cm-pcard__page { outline: 0; box-shadow: 0 0 0 3px var(--accent), 0 0 0 8px var(--accent-soft); }
+.cm-actionbar { background: var(--surface); border-bottom: 0.5px solid var(--line-strong); }
+
+/* AI kutusu: kapsam düğmesi dolgu, yazma kutusu sakin. */
+.cm-ai__chip { background: var(--fill); border-radius: 8px; }
+.cm-ai__chip:hover { background: var(--fill-strong); }
+.cm-ai__box { border: 0.5px solid var(--line-strong) !important; border-radius: 18px !important; box-shadow: 0 1px 3px rgba(0, 0, 0, .05); }
+.cm-ai__box:focus-within { border-color: var(--focus) !important; box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 22%, transparent) !important; }
+.cm-ai__sendbtn { border-radius: 50% !important; background: var(--accent-fill) !important; color: #fff !important; }
+.cm-ai__sendbtn.is-stop { background: var(--ink) !important; color: var(--surface) !important; }
+.cm-ai__sendbtn:disabled { background: var(--fill-strong) !important; color: var(--ink-muted) !important; }
+.cm-ai__suggest { border: 0 !important; background: var(--fill) !important; border-radius: 980px !important; }
+.cm-ai__suggest:hover:not(:disabled) { background: var(--fill-strong) !important; }
+.cm-ai__iconbtn { border-radius: 8px; }
+.cm-ai__iconbtn:hover { background: var(--fill); }
+
+/* Panel öğeleri: vurgu rengi biraz daha hafif, meta satırı sakin. */
+.cm-item__quote mark { border-radius: 4px; }
+.cm-item__add { color: var(--accent); font-weight: 500; }
+
+/* Uyarı bandı: sarı yerine nötr kart, simge renkli. */
+.cm-notice--warn { background: var(--surface-raised); box-shadow: var(--shadow-sheet); }
+.cm-notice__sym { border-radius: 50%; }
+
+/* Mod seçici (Oku/Yaz/Düzenle) üst çubukta biraz daha kompakt. */
+.cm-bar .cm-seg button { min-height: 26px; padding: 0 12px; }
+
+/* Ana ekran: dosya varken bırakma alanı kompakt (simge · başlık · düğme), ilk açılışta büyük. */
+@media (min-width: 721px) {
+  .cm-home.has-recent .cm-drop:not(.is-over):has(.cm-drop__actions) {
+    display: grid; grid-template-columns: auto 1fr auto; column-gap: 16px; row-gap: 2px; align-items: center;
+    text-align: left; padding: 20px 24px; border-radius: var(--radius-xl);
+  }
+  .cm-home.has-recent .cm-drop:has(.cm-drop__actions) .cm-drop__icon { grid-row: 1 / 3; width: 48px; height: 48px; margin: 0; }
+  .cm-home.has-recent .cm-drop:has(.cm-drop__actions) .cm-display { grid-column: 2; font-size: 19px; line-height: 24px; font-weight: 600; letter-spacing: -0.015em; }
+  .cm-home.has-recent .cm-drop:has(.cm-drop__actions) > p.cm-muted { grid-column: 2; font-size: 13px; }
+  .cm-home.has-recent .cm-drop:has(.cm-drop__actions) .cm-drop__actions { grid-column: 3; grid-row: 1 / 3; margin: 0; }
+  .cm-home.has-recent .cm-drop:has(.cm-drop__actions) .cm-drop__alt { grid-column: 2 / 4; justify-content: flex-start; margin: 10px 0 0 -8px; }
+  .cm-home.has-recent .cm-drop:has(.cm-drop__actions) .cm-drop__trust { display: none; }
+}
+.cm-drop__link { border-radius: 8px; transition: background-color .15s var(--ease); }
+.cm-drop__link:hover { background: var(--fill); }
+.cm-home.has-recent { padding-top: 48px; gap: 24px; }
+.cm-home.has-recent > *, .cm-home.has-recent .cm-notice { width: min(880px, 100%); }
+.cm-home.has-recent .cm-drop { width: min(880px, 100%); max-width: none; box-sizing: border-box; margin: 0 auto; }
