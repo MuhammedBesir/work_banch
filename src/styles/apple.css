@@ -284,3 +284,23 @@ body { letter-spacing: -0.01em; text-rendering: optimizeLegibility; }
 .cm-home.has-recent { padding-top: 48px; gap: 24px; }
 .cm-home.has-recent > *, .cm-home.has-recent .cm-notice { width: min(880px, 100%); }
 .cm-home.has-recent .cm-drop { width: min(880px, 100%); max-width: none; box-sizing: border-box; margin: 0 auto; }
+
+/* ==========================================================================
+   Yazma kolaylığı: okunur metin kutusu, yer tutucu, yazı boyutu düğmeleri
+   ========================================================================== */
+/* Sayfa metninin üstüne yazılan yazı okunsun: hafif kâğıt rengi zemin. */
+.cm-page .cm-textbox:not(:empty) { background: color-mix(in srgb, var(--sheet) 86%, transparent); border-radius: calc(4px * var(--z, 1)); }
+.cm-page .cm-textbox[contenteditable] { background: var(--sheet); outline: 1.5px solid var(--accent) !important; outline-offset: 1px; box-shadow: 0 2px 10px rgba(0, 0, 0, .10); border-radius: calc(4px * var(--z, 1)); cursor: text; }
+.cm-page .cm-textbox[contenteditable]:empty::before { content: "Yazmaya başla…"; color: #8e8e93; pointer-events: none; }
+.cm-page .cm-sticky__text[contenteditable]:empty::before { content: "Not yaz…"; color: rgba(0, 0, 0, .45); pointer-events: none; }
+/* Yazı boyutu: dört "A", büyüyen boyutta. */
+.cm-palette__sizes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 2px; padding: 2px; background: var(--fill); border-radius: 10px; }
+.cm-tsize { height: 30px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-muted); font-family: var(--font-display); font-weight: 600; line-height: 1; cursor: pointer; display: grid; place-items: center; padding: 0; }
+.cm-tsize:hover { color: var(--ink); background: var(--fill); }
+.cm-tsize.is-on { background: var(--surface-raised); color: var(--accent); box-shadow: 0 1px 3px rgba(0, 0, 0, .12); }
+@media (max-width: 720px) {
+  .cm-stagewrap > .cm-palette .cm-palette__sizes { grid-auto-flow: column; grid-template-columns: none; grid-auto-columns: 34px; flex: none; }
+  .cm-stagewrap > .cm-palette .cm-tsize { height: var(--target-touch); }
+}
+/* Biçim çubuğu: sade, cam. */
+.cm-formatbar { border: 0 !important; border-radius: 10px !important; background: var(--glass) !important; backdrop-filter: saturate(180%) blur(20px); -webkit-backdrop-filter: saturate(180%) blur(20px); box-shadow: var(--shadow-float) !important; }

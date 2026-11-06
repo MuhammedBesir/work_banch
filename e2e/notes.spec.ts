@@ -66,6 +66,28 @@ test("Biçimli not: yapılacak kutusu ve kalın yazı", async ({ page }) => {
   await expect(check).toBeChecked();
 });
 
+test("Metin yazma: dışarı tıklamak yalnızca bitirir, yazı boyutu uygulanır", async ({ page }) => {
+  await newNotebook(page);
+  await page.keyboard.press("t");
+  const box = (await page.locator('.cm-page[data-page="0"]').boundingBox())!;
+  await page.mouse.click(box.x + 80, box.y + 200);
+  await expect(page.locator(".cm-textbox[contenteditable]")).toBeVisible();
+  // Yazarken boyut düğmesi imleci almaz; yazı kaybolmaz.
+  await page.getByRole("button", { name: "Yazı boyutu: büyük" }).click();
+  await page.keyboard.type("Başlık");
+  await page.mouse.click(box.x + 300, box.y + 500);
+  await expect(page.locator(".cm-textbox")).toHaveCount(1);
+  await expect(page.locator(".cm-textbox[contenteditable]")).toHaveCount(0);
+  await expect(page.locator(".cm-textbox")).toHaveText("Başlık");
+  expect(await page.locator(".cm-textbox").evaluate((el) => (el as HTMLElement).style.getPropertyValue("--fs"))).toBe("22px");
+  // İkinci tıklama yeni kutu açar; Ctrl Enter bitirir.
+  await page.mouse.click(box.x + 80, box.y + 400);
+  await page.keyboard.type("İkinci not");
+  await page.keyboard.press("Control+Enter");
+  await expect(page.locator(".cm-textbox")).toHaveCount(2);
+  await expect(page.locator(".cm-textbox[contenteditable]")).toHaveCount(0);
+});
+
 test("Son açılanlar: klasör, etiket, kapaklar ve erişilebilirlik", async ({ page, browserName }) => {
   await newNotebook(page);
   await page.locator(".cm-bar__file").click();

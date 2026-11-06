@@ -188,7 +188,7 @@ export interface Settings {
   railOpen: boolean;
   panelOpen: boolean;
   ai: AiSettings;
-  pen: { color: InkColor; width: number; kind?: PenKind; custom?: string[] };
+  pen: { color: InkColor; width: number; kind?: PenKind; custom?: string[]; textSize?: number };
   /** İsteğe bağlı yerel hata günlüğü (hiçbir yere gönderilmez). */
   errorLog: boolean;
   /** Son açılanlar görünümü. */

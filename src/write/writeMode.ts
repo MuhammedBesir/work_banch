@@ -11,6 +11,9 @@ import { PEN_KIND_LABEL, PEN_LABEL, colorClass, colorLabel } from "./layer";
 import { applyFormat } from "./rich";
 import { icon } from "../ui/icons";
 
+/** Metin kutusu yazı boyutları (px, %100 yakınlaştırmada). */
+const TEXT_SIZES: [number, string][] = [[12, "küçük"], [16, "orta"], [22, "büyük"], [30, "başlık"]];
+
 export type Tool = "select" | "lasso" | "highlight" | "pen" | "text" | "sticky" | "shape" | "image" | "eraser";
 
 const TOOLS: [Tool, string, string][] = [
@@ -41,7 +44,7 @@ export interface WriteActions {
   remove(id: string): void;
   /** Sayfanın işaret katmanını yeniden çiz (seçim/araç değişince). */
   redraw(page: number): void;
-  pen(p: { color: InkColor; width: number; kind: PenKind; custom: string[] }): void;
+  pen(p: { color: InkColor; width: number; kind: PenKind; custom: string[]; textSize: number }): void;
   announce(text: string): void;
   /** Seçili el yazısını metne çevir ya da matematiği çöz (kement eylem çubuğu). */
   handwriting?(marks: Mark[], page: number, mode: "text" | "math"): void;
@@ -61,6 +64,8 @@ export class WriteMode {
   width: number;
   pen: PenKind;
   eraserMode: EraserMode = "partial";
+  /** Yeni metin kutularının yazı boyutu (px, %100 yakınlaştırmada). */
+  textSize: number;
   private custom: string[];
   private colorsOpen = false;
   /** Seçili işaretler (`Shift` + tıklama ile çoklu seçim). */
@@ -73,16 +78,26 @@ export class WriteMode {
   constructor(
     private viewer: Viewer,
     private fileHash: string,
-    pen: { color: InkColor; width: number; kind?: PenKind; custom?: string[] },
+    pen: { color: InkColor; width: number; kind?: PenKind; custom?: string[]; textSize?: number },
     private actions: WriteActions,
   ) {
+    this.textSize = pen.textSize ?? 16;
     this.color = pen.color;
     this.width = pen.width;
     this.pen = pen.kind ?? "pen";
     this.custom = pen.custom ?? [];
     this.el = h("div", { class: "cm-palette", role: "toolbar", "aria-label": "Yazma araçları", "aria-orientation": "vertical" });
     this.el.addEventListener("pointerdown", (e) => e.stopPropagation());
+    // Yazarken palete basmak (boyut, renk) imleci metin kutusundan almasın.
+    this.el.addEventListener("mousedown", (e) => {
+      if (this.editingId && (e.target as HTMLElement).closest("button")) e.preventDefault();
+    });
     this.renderPalette();
+  }
+
+  private editingTextKind(): Mark["kind"] | null {
+    const id = this.editingId ?? (this.selected.size === 1 ? this.selectedId : null);
+    return id ? this.find(id)?.kind ?? null : null;
   }
 
   get selectedId(): string | null {
@@ -152,7 +167,7 @@ export class WriteMode {
   }
 
   private savePen(): void {
-    this.actions.pen({ color: this.color, width: this.width, kind: this.pen, custom: this.custom });
+    this.actions.pen({ color: this.color, width: this.width, kind: this.pen, custom: this.custom, textSize: this.textSize });
   }
 
   setColor(c: InkColor): void {
@@ -161,6 +176,22 @@ export class WriteMode {
     this.savePen();
     this.renderPalette();
     if (this.selected.size) this.recolorSelected(c);
+  }
+
+  /** Yazı boyutu: yeni kutular için; seçili ya da düzenlenen metin kutusuna da hemen uygulanır. */
+  setTextSize(size: number): void {
+    this.textSize = size;
+    this.savePen();
+    this.renderPalette();
+    const id = this.editingId ?? (this.selected.size === 1 ? this.selectedId : null);
+    const m = id ? this.find(id) : null;
+    if (m?.kind !== "text") return;
+    const host = this.viewer.root.querySelector<HTMLElement>(`.cm-textbox[data-id="${CSS.escape(m.id)}"]`);
+    host?.style.setProperty("--fs", `${size}px`);
+    if (this.editingId === m.id) return; // düzenleme bitince kaydedilir
+    const after = { ...m, size, updatedAt: Date.now() } as Mark;
+    this.actions.update(after);
+    this.record([{ before: m, after }]);
   }
 
   private setWidth(w: number): void {
@@ -192,7 +223,10 @@ export class WriteMode {
           ? [sep(), group("Silgi",
               btn("eraser-partial", "Kısmi silgi: yalnızca değdiği yer", this.eraserMode === "partial", () => ((this.eraserMode = "partial"), this.renderPalette()), "cm-tool cm-tool--sub"),
               btn("eraser-stroke", "Bütün çizgiyi sil", this.eraserMode === "stroke", () => ((this.eraserMode = "stroke"), this.renderPalette()), "cm-tool cm-tool--sub"))]
-          : [];
+          : this.tool === "text" || this.editingTextKind() === "text"
+            ? [sep(), h("div", { class: "cm-palette__sizes", role: "group", "aria-label": "Yazı boyutu" }, ...TEXT_SIZES.map(([s, label]) =>
+                h("button", { class: `cm-tsize${this.textSize === s ? " is-on" : ""}`, "aria-pressed": String(this.textSize === s), "aria-label": `Yazı boyutu: ${label}`, title: `Yazı boyutu: ${label}`, onclick: () => this.setTextSize(s), style: `font-size:${Math.round(s * 0.62 + 2.5)}px` }, "A")))]
+            : [];
     const swatch = (c: InkColor, label: string) => {
       const b = h("button", { class: `cm-pen cm-pen--${colorClass(c)}${this.color === c ? " is-on" : ""}`, "aria-label": label, "aria-pressed": String(this.color === c), title: label, onclick: () => this.setColor(c) });
       if (isCustom(c)) b.style.setProperty("--c", c);
@@ -364,8 +398,11 @@ export class WriteMode {
       }
     }
     if (!at) return;
+    const wasEditing = !!this.editingId;
     this.finishEditing();
     e.preventDefault();
+    // Yazarken boş bir yere tıklamak yalnızca yazmayı bitirir; hemen yeni boş kutu açmaz.
+    if (wasEditing && (this.tool === "text" || this.tool === "sticky") && !target.closest(".cm-textbox, .cm-sticky")) return;
     if (penEraser) return this.erase(e, at);
     if (target.closest(".cm-selbox")) return this.dragSelection(e, at);
     // Metin ve Not araçlarında var olan kutuya basınca yenisi açılmaz: sürükleyince taşınır, tıklayınca düzenlenir.
@@ -931,7 +968,8 @@ export class WriteMode {
     const width = kind === "sticky" ? 0.26 : 0.32;
     const x = Math.min(at.x, 1 - width);
     const m: Mark = kind === "text"
-      ? { id: uid(), fileHash: this.fileHash, page: at.page, kind: "text", color: this.color, box: [x, at.y, width, 0.03], text: "", createdAt: now, updatedAt: now }
+      // Tıklanan nokta ilk satırın ortasına gelsin (imleç fare ucunda başlar).
+      ? { id: uid(), fileHash: this.fileHash, page: at.page, kind: "text", color: this.color, size: this.textSize, box: [x, Math.max(0, at.y - (this.textSize * 0.75) / at.h), width, 0.03], text: "", createdAt: now, updatedAt: now }
       : { id: uid(), fileHash: this.fileHash, page: at.page, kind: "sticky", box: [x, at.y, width, 0.08], text: "", createdAt: now, updatedAt: now };
     this.actions.add(m);
     this.edit(m.id, true);
@@ -947,6 +985,9 @@ export class WriteMode {
     const el = m.kind === "sticky" ? host?.querySelector<HTMLElement>(".cm-sticky__text") : host;
     if (!el) return;
     this.editingId = id;
+    // Palet düzenlenen kutunun yazı boyutunu gösterir (boyut düğmeleri ona uygulanır).
+    if (m.kind === "text") this.textSize = m.size ?? 14;
+    this.renderPalette();
     // Düzenlerken ham metin (biçim işaretleriyle) görünür.
     el.textContent = m.text;
     el.spellcheck = true;
@@ -968,6 +1009,7 @@ export class WriteMode {
       el.removeEventListener("keydown", onKey);
       if (this.editingId !== id) return;
       this.editingId = null;
+      this.renderPalette();
       const text = el.innerText.replace(/\n+$/, "").trim();
       const pageEl = this.viewer.pageElement(m.page);
       const hgt = pageEl ? (host!.offsetHeight / pageEl.clientHeight) : before.box[3];
@@ -976,13 +1018,14 @@ export class WriteMode {
         if (!isNew) this.record([{ remove: before }]);
         return;
       }
-      const after = { ...before, text, box: [before.box[0], before.box[1], before.box[2], hgt], updatedAt: Date.now() } as Mark;
+      const size = before.kind === "text" && host!.style.getPropertyValue("--fs") ? parseFloat(host!.style.getPropertyValue("--fs")) : undefined;
+      const after = { ...before, text, ...(size ? { size } : {}), box: [before.box[0], before.box[1], before.box[2], hgt], updatedAt: Date.now() } as Mark;
       this.actions.update(after);
       this.record([isNew ? { add: after } : { before, after }]);
     };
     const onKey = (e: KeyboardEvent) => {
       e.stopPropagation();
-      if (e.key === "Escape") {
+      if (e.key === "Escape" || (e.key === "Enter" && (e.ctrlKey || e.metaKey))) {
         e.preventDefault();
         el.blur();
       }
