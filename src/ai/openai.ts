@@ -41,7 +41,7 @@ export function friendlyError(err: unknown, local: boolean, name = "Sağlayıcı
     return { title: "Yerel sunucuya bağlanılamadı", text: "Ollama ya da LM Studio açık mı? Adresi Ayarlar > AI'dan kontrol et; tarayıcıdan erişim için sunucuda CORS'a izin verilmeli (Ollama: OLLAMA_ORIGINS)." };
   }
   if (err instanceof OpenAI.AuthenticationError) return { title: "API anahtarı geçersiz", text: "Ayarlar > AI'dan anahtarını kontrol et ya da yenisini gir." };
-  if (err instanceof OpenAI.NotFoundError) return { title: "Model bulunamadı", text: "Model adını Ayarlar > AI'dan kontrol et." };
+  if (err instanceof OpenAI.NotFoundError) return { title: "Model bulunamadı", text: `Model adını Ayarlar > AI'dan kontrol et ("Anahtarı dene ve modelleri yükle" ile listeden seç). ${name}: „${err.message.replace(/^\d+\s*/, "").slice(0, 160)}"` };
   if (err instanceof OpenAI.RateLimitError) {
     // Bekleme süresi: retry-after başlığı (CORS'ta gizli olabilir) ya da mesajdaki "try again in 1m2.5s".
     const m = /try again in (?:(\d+)h)?(?:(\d+)m)?(?:([\d.]+)s)?/i.exec(err.message);
@@ -50,10 +50,11 @@ export function friendlyError(err: unknown, local: boolean, name = "Sağlayıcı
     const when = Number.isFinite(wait) && wait > 0 ? (wait < 90 ? `${Math.ceil(wait)} sn sonra` : `Yaklaşık ${Math.ceil(wait / 60)} dk sonra`) : "Biraz sonra";
     return { title: `${name} sınırı doldu`, text: `Ücretsiz katmanın dakikalık ya da günlük sınırına ulaşıldı. ${when} yeniden dene ya da Ayarlar > AI'dan başka bir sağlayıcıya geç.` };
   }
-  if (err instanceof OpenAI.BadRequestError) return { title: "İstek kabul edilmedi", text: "Kapsam çok uzun olabilir. Daha dar bir kapsam seçip yeniden dene." };
+  if (err instanceof OpenAI.BadRequestError) return { title: "İstek kabul edilmedi", text: `${name} isteği reddetti: „${err.message.replace(/^\d+\s*/, "").slice(0, 220)}". Model adını ya da kapsamı kontrol et.` };
+  if (err instanceof OpenAI.PermissionDeniedError) return { title: "Bu anahtarın izni yok", text: `${name}: „${err.message.replace(/^\d+\s*/, "").slice(0, 220)}"` };
   if (err instanceof OpenAI.APIConnectionError) return { title: "Bağlantı kurulamadı", text: "İnternet bağlantını kontrol edip yeniden dene." };
   if (err instanceof OpenAI.APIError) return { title: "AI cevap veremedi", text: `Sağlayıcı ${err.status ?? ""} hatası döndürdü. Biraz sonra yeniden dene.`.replace("  ", " ") };
-  return { title: "AI cevap veremedi", text: "Beklenmeyen bir sorun oldu. Yeniden dene." };
+  return { title: "AI cevap veremedi", text: `Beklenmeyen bir sorun oldu: ${err instanceof Error ? err.message : String(err)}` };
 }
 
 /** OpenAI uyumlu servisteki modeller (anahtar denemesi de olur). */

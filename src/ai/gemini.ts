@@ -81,9 +81,12 @@ async function stream(model: string, apiKey: string, body: unknown, signal: Abor
         if (m !== model) onModel?.(m);
         return await read(res, onText);
       } catch (e) {
-        if (!busy(e) && !(i > 0 && e instanceof GeminiError && e.status === 404)) throw e;
+        // Sınır dolu (429) ya da model yok (404): ücretsiz katmanda her modelin ayrı sınırı var, diğerine geç.
+        const switchable = e instanceof GeminiError && (e.status === 429 || e.status === 404);
+        if (!busy(e) && !switchable) throw e;
         last = e;
         console.warn(`Gemini ${m}: ${e instanceof GeminiError ? `${e.status} ${e.message}` : e}`);
+        if (switchable) break;
       }
     }
     if (i === 0) chain = await fallbackChain(apiKey, model);
@@ -203,10 +206,15 @@ export function friendlyError(err: unknown): { title: string; text: string } {
   if (err instanceof DOMException && err.name === "AbortError") return { title: "Durduruldu", text: "Cevap yarıda kesildi. İstersen yeniden üret." };
   if (err instanceof GeminiError) {
     if (err.reason === "API_KEY_INVALID" || (err.status === 400 && /API key/i.test(err.message))) return { title: "API anahtarı geçersiz", text: "Ayarlar > AI'dan Gemini anahtarını kontrol et; aistudio.google.com'dan yenisini alabilirsin." };
-    if (err.status === 403) return { title: "Bu anahtarın izni yok", text: "Anahtar bu modele ya da Gemini API'ye erişemiyor. Google AI Studio'da anahtarın projesini kontrol et." };
-    if (err.status === 404) return { title: "Model bulunamadı", text: "Ayarlar > AI'dan başka bir Gemini modeli seç (Modelleri yükle ile güncel listeyi al)." };
-    if (err.status === 429) return { title: "İstek sınırına ulaşıldı", text: "Ücretsiz katmanın dakikalık ya da günlük sınırı dolmuş olabilir. Biraz bekleyip yeniden dene ya da daha hafif bir model seç." };
-    if (err.status === 400) return { title: "İstek kabul edilmedi", text: "Kapsam çok uzun olabilir. Daha dar bir kapsam seçip yeniden dene." };
+    // Google'ın kendi açıklaması da gösterilir: sorunu kullanıcı ya da destek görebilsin.
+    const why = err.message ? ` Google: „${err.message.replace(/\s+/g, " ").slice(0, 220)}"` : "";
+    if (err.status === 403) return { title: "Bu anahtarın izni yok", text: `Anahtar bu modele ya da Gemini API'ye erişemiyor. Google AI Studio'da anahtarın projesini kontrol et (Generative Language API açık olmalı).${why}` };
+    if (err.status === 404) return { title: "Model bulunamadı", text: `Ayarlar > AI'dan başka bir Gemini modeli seç ("Anahtarı dene ve modelleri yükle" ile güncel listeyi al).${why}` };
+    if (err.status === 429) {
+      if (/limit:\s*0\b|free.?tier/i.test(err.message)) return { title: "Bu model ücretsiz katmanda yok", text: `Ayarlar > AI'dan Gemini Flash ya da Flash-Lite seç; ücretsiz katman bu modellere açık.${why}` };
+      return { title: "Gemini sınırı doldu", text: `Ücretsiz katmanın dakikalık ya da günlük sınırı doldu; diğer Flash modelleri de denendi. Bir dakika bekleyip yeniden dene, günlük sınırsa Türkiye saatiyle ~10:00'da yenilenir. İstersen Ayarlar > AI'dan Groq'a geç.${why}` };
+    }
+    if (err.status === 400) return { title: "İstek kabul edilmedi", text: `Google isteği reddetti.${why}` };
     if (err.status >= 500) {
       return {
         title: "Gemini şu an yoğun",
@@ -216,5 +224,5 @@ export function friendlyError(err: unknown): { title: string; text: string } {
     return { title: "AI cevap veremedi", text: `Gemini ${err.status} hatası döndürdü${err.message ? ` („${err.message.slice(0, 160)}")` : ""}. Biraz sonra yeniden dene.` };
   }
   if (err instanceof TypeError) return { title: "Bağlantı kurulamadı", text: "İnternet bağlantını kontrol edip yeniden dene." };
-  return { title: "AI cevap veremedi", text: "Beklenmeyen bir sorun oldu. Yeniden dene." };
+  return { title: "AI cevap veremedi", text: `Beklenmeyen bir sorun oldu: ${err instanceof Error ? err.message : String(err)}` };
 }

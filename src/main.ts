@@ -23,7 +23,7 @@ import { icon } from "./ui/icons";
 import { AudioBar } from "./audio/bar";
 import { canLiveTranscribe, canRecord, clock, Recorder } from "./audio/recorder";
 import { openTranscript } from "./audio/transcript";
-import { askCover, askFolder, askNotebook, askPin, askTags } from "./ui/organize";
+import { askCover, askFolder, askFolderName, askNotebook, askPin, askTags } from "./ui/organize";
 import type { Template } from "./editor/templates";
 import { checkLock, makeLock } from "./app/lock";
 import { rasterInk } from "./write/raster";
@@ -444,9 +444,12 @@ async function openFile(file: File, handle?: FsHandle, extra: Partial<FileRecord
     home?.showIdle();
     return;
   }
+  // Bir dersin içindeyken açılan (seçilen ya da bırakılan) yeni PDF o derse eklenir.
+  const intoFolder = !existing?.folder && home?.activeFolder ? { folder: home.activeFolder } : {};
   const rec: FileRecord = {
     // Düzen bilgisi (klasör, etiket, kapak, kilit, not defteri) korunur.
     ...existing,
+    ...intoFolder,
     ...extra,
     hash,
     name: file.name,
@@ -514,7 +517,7 @@ async function organize(rec: FileRecord, what: import("./ui/home").Organize): Pr
   let next: FileRecord | null = null;
   if (what === "pin") next = { ...cur, pinned: !cur.pinned };
   else if (what === "folder") {
-    const f = await askFolder(cur.folder ?? "", [...new Set(all.map((x) => x.folder).filter((x): x is string => !!x))]);
+    const f = await askFolder(cur.folder ?? "", [...new Set([...(await folderList()), ...all.map((x) => x.folder).filter((x): x is string => !!x)])].sort((a, b) => a.localeCompare(b, "tr")));
     if (f !== null) next = { ...cur, folder: f || undefined };
   } else if (what === "tags") {
     const t = await askTags(cur.tags ?? [], [...new Set(all.flatMap((x) => x.tags ?? []))]);
@@ -702,6 +705,37 @@ async function showHome(): Promise<void> {
       return settings.homeView ?? "list";
     },
     setView: (v) => void changeSettings({ ...settings, homeView: v }).then(() => refreshRecent()),
+    createFolder: async () => {
+      const name = await askFolderName("Yeni ders");
+      if (!name) return null;
+      const list = await folderList();
+      if (!list.includes(name)) await db.putMeta("folders", [...list, name]);
+      await refreshRecent();
+      return name;
+    },
+    renameFolder: async (old) => {
+      const name = await askFolderName("Dersi yeniden adlandır", old, "Kaydet");
+      if (!name || name === old) return null;
+      await db.putMeta("folders", [...new Set((await folderList()).map((f) => (f === old ? name : f)).concat(name))]);
+      for (const f of await db.allFiles()) if (f.folder === old) await db.putFile({ ...f, folder: name });
+      await refreshRecent();
+      return name;
+    },
+    deleteFolder: async (name) => {
+      const files = (await db.allFiles()).filter((f) => f.folder === name);
+      if (!(await confirmDialog({ title: `„${name}" dersi silinsin mi?`, text: files.length ? `İçindeki ${files.length} PDF silinmez; kitaplıkta "Son açılanlar"da kalır. Vurgu ve notlar olduğu gibi durur.` : "Ders boş.", ok: "Dersi sil", danger: true }))) return false;
+      await db.putMeta("folders", (await folderList()).filter((f) => f !== name));
+      for (const f of files) await db.putFile({ ...f, folder: undefined });
+      await refreshRecent();
+      return true;
+    },
+    moveTo: async (hash, folder) => {
+      const f = await db.getFile(hash);
+      if (!f || (f.folder ?? null) === folder) return;
+      await db.putFile({ ...f, folder: folder ?? undefined });
+      await refreshRecent();
+      toast(folder ? `„${f.name}" → ${folder}` : `„${f.name}" dersten çıkarıldı.`);
+    },
   });
   app.replaceChildren(home.el);
   document.title = "Çalışma Masası";
@@ -711,6 +745,11 @@ async function showHome(): Promise<void> {
   idle(() => void loadPdfjs());
 }
 
+/** Dersler (klasörler): boş dersler de saklanır (meta "folders"); dosyaların klasörleriyle birleşir. */
+async function folderList(): Promise<string[]> {
+  return (await db.getMeta<string[]>("folders")) ?? [];
+}
+
 async function refreshRecent(): Promise<void> {
   const files = await db.allFiles();
   const rows: RecentRow[] = await Promise.all(files.map(async (rec) => ({
@@ -718,7 +757,7 @@ async function refreshRecent(): Promise<void> {
     highlights: await db.countHighlights(rec.hash),
     reachable: !!rec.handle || await hasCopy(rec.hash),
   })));
-  home?.renderRecent(rows);
+  home?.renderRecent(rows, await folderList());
   home?.setNotice(await backupNotice());
 }
 
@@ -910,7 +949,7 @@ async function openReader(file: OpenDoc): Promise<void> {
     } },
     "sep",
     { label: "Başka dosya aç", shortcut: "Ctrl O", run: () => void pickFile() },
-    { label: "Son açılanlar", run: () => void goHome() },
+    { label: "PDF'i kapat (kitaplığa dön)", run: () => void goHome() },
     "sep",
     { label: "Ayarlar", run: settingsDialog },
     { label: "Kısayollar", shortcut: "?", run: openShortcuts },
@@ -972,7 +1011,10 @@ async function openReader(file: OpenDoc): Promise<void> {
   const sep = () => h("span", { class: "cm-bar__sep" });
 
   const bar = h("header", { class: "cm-bar", role: "toolbar", "aria-label": "Okuyucu araç çubuğu" },
-    h("div", { class: "cm-bar__group" }, railBtn, fileBtn),
+    h("div", { class: "cm-bar__group" },
+      // PDF'ten çık: kitaplığa (ana ekran) dön. Değişiklikler zaten kayıtlı.
+      h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--withicon cm-bar__home", title: "PDF'i kapat, kitaplığa dön", "aria-label": "Kitaplığa dön", onclick: () => void goHome() }, icon("back"), h("span", { class: "is-wide", text: "Kitaplık" })),
+      railBtn, fileBtn),
     modeSeg,
     h("span", { class: "cm-bar__sep is-reader" }),
     h("div", { class: "cm-bar__group is-reader", "aria-label": "Sayfa" },
@@ -1940,8 +1982,11 @@ async function goHome(): Promise<void> {
     await setMode("read");
     if (reader?.editor) return;
   }
+  // PDF bir dersteyse kapatınca o derse dönülür.
+  const folder = reader?.file.rec.folder;
   closeReader();
   await showHome();
+  if (folder) home?.showFolder(folder);
 }
 
 // ---------- Vurgular ----------

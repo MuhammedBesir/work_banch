@@ -380,7 +380,7 @@ export class WriteMode {
     this.penButton = penEraser;
     if ((this.tool === "highlight" && !penEraser) || (e.button > 0 && !penEraser)) return;
     const target = e.target as HTMLElement;
-    if (target.closest(".cm-floatwrap, .cm-sticky__toggle, .cm-selbox__bar, .cm-rich__check input, .cm-formatbar")) return;
+    if (target.closest(".cm-floatwrap, .cm-sticky__toggle, .cm-selbox__bar, .cm-rich__check input, .cm-formatbar, .cm-edithandle")) return;
     if (this.editingId && target.closest("[contenteditable]")) return;
     if (target.dataset.handle) return this.resizeText(e, target.dataset.handle);
     if (target.dataset.scale) return this.scaleSelection(e, target.dataset.scale);
@@ -967,9 +967,12 @@ export class WriteMode {
     const now = Date.now();
     const width = kind === "sticky" ? 0.26 : 0.32;
     const x = Math.min(at.x, 1 - width);
+    const z = this.viewer.scale;
+    const tx = Math.max(0, Math.min(at.x - (6 * z) / at.w, 1 - width));
+    const ty = Math.max(0, at.y - ((4 + this.textSize * 1.43 / 2) * z) / at.h);
     const m: Mark = kind === "text"
-      // Tıklanan nokta ilk satırın ortasına gelsin (imleç fare ucunda başlar).
-      ? { id: uid(), fileHash: this.fileHash, page: at.page, kind: "text", color: this.color, size: this.textSize, box: [x, Math.max(0, at.y - (this.textSize * 0.75) / at.h), width, 0.03], text: "", createdAt: now, updatedAt: now }
+      // İmleç tam tıklanan noktada başlasın: kutunun iç boşluğu ve ilk satırın yarısı (yakınlaştırmayla) geri alınır.
+      ? { id: uid(), fileHash: this.fileHash, page: at.page, kind: "text", color: this.color, size: this.textSize, box: [tx, ty, width, 0.03], text: "", createdAt: now, updatedAt: now }
       : { id: uid(), fileHash: this.fileHash, page: at.page, kind: "sticky", box: [x, at.y, width, 0.08], text: "", createdAt: now, updatedAt: now };
     this.actions.add(m);
     this.edit(m.id, true);
@@ -1004,6 +1007,8 @@ export class WriteMode {
     getSelection()?.addRange(range);
 
     const before = m;
+    /** Düzenlerken taşınan / genişliği değişen kutunun güncel yeri (0–1). */
+    const cur: [number, number, number] = [m.box[0], m.box[1], m.box[2]];
     const finish = () => {
       el.removeEventListener("blur", finish);
       el.removeEventListener("keydown", onKey);
@@ -1019,7 +1024,7 @@ export class WriteMode {
         return;
       }
       const size = before.kind === "text" && host!.style.getPropertyValue("--fs") ? parseFloat(host!.style.getPropertyValue("--fs")) : undefined;
-      const after = { ...before, text, ...(size ? { size } : {}), box: [before.box[0], before.box[1], before.box[2], hgt], updatedAt: Date.now() } as Mark;
+      const after = { ...before, text, ...(size ? { size } : {}), box: [cur[0], cur[1], cur[2], hgt], updatedAt: Date.now() } as Mark;
       this.actions.update(after);
       this.record([isNew ? { add: after } : { before, after }]);
     };
@@ -1036,10 +1041,56 @@ export class WriteMode {
     const bar = h("div", { class: "cm-formatbar", role: "toolbar", "aria-label": "Biçim" },
       fmt("B", "bold", "Kalın (Ctrl B)"), fmt("I", "italic", "İtalik (Ctrl I)"), fmt("U", "underline", "Altı çizili (Ctrl U)"), fmt("S", "strike", "Üstü çizili"),
       fmt("•", "bullet", "Madde işareti"), fmt("1.", "number", "Sıralı liste"), fmt("☐", "check", "Yapılacak"), fmt("H", "heading", "Başlık"), fmt("▦", "table", "Tablo"));
-    // Çubuk kutunun dışında (kutunun metnine karışmasın), sol üst köşesinin hemen üstünde.
-    bar.style.left = host!.style.left;
-    bar.style.top = host!.style.top;
-    host!.parentElement?.append(bar);
+    // Taşıma tutamacı (çubuğun solunda) ve genişlik tutamacı (kutunun sağ kenarında): yazarken de kullanılır,
+    // imleç metinde kalır.
+    const layerEl = host!.parentElement!;
+    const grip = h("button", { class: "cm-formatbar__btn cm-formatbar__grip", title: "Sürükleyerek taşı", "aria-label": "Kutuyu taşı" }, icon("move"));
+    bar.prepend(grip, h("span", { class: "cm-formatbar__sep" }));
+    const sizer = h("span", { class: "cm-edithandle", title: "Sürükleyerek genişliği değiştir", "aria-hidden": "true" });
+    const place = () => {
+      host!.style.left = `${cur[0] * 100}%`;
+      host!.style.top = `${cur[1] * 100}%`;
+      host!.style.width = `${cur[2] * 100}%`;
+      // Çubuk kutunun dışında (metne karışmasın), sol üst köşesinin hemen üstünde.
+      bar.style.left = host!.style.left;
+      bar.style.top = host!.style.top;
+      sizer.style.left = `calc(${(cur[0] + cur[2]) * 100}% - 6px)`;
+      sizer.style.top = `${host!.offsetTop + host!.offsetHeight / 2 - 12}px`;
+    };
+    const drag = (ev: PointerEvent, apply: (dx: number, dy: number, start: [number, number, number]) => void) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const start: [number, number, number] = [...cur];
+      const W0 = layerEl.clientWidth;
+      const H0 = layerEl.clientHeight;
+      const target = ev.currentTarget as HTMLElement;
+      target.setPointerCapture(ev.pointerId);
+      target.classList.add("is-dragging");
+      const move = (e2: PointerEvent) => {
+        apply((e2.clientX - ev.clientX) / W0, (e2.clientY - ev.clientY) / H0, start);
+        place();
+      };
+      const up = () => {
+        target.removeEventListener("pointermove", move);
+        target.classList.remove("is-dragging");
+        el.focus({ preventScroll: true });
+      };
+      target.addEventListener("pointermove", move);
+      target.addEventListener("pointerup", up, { once: true });
+      target.addEventListener("pointercancel", up, { once: true });
+    };
+    grip.addEventListener("pointerdown", (ev) => drag(ev, (dx, dy, s) => {
+      cur[0] = Math.max(0, Math.min(1 - s[2], s[0] + dx));
+      cur[1] = Math.max(0, Math.min(0.98, s[1] + dy));
+    }));
+    sizer.addEventListener("pointerdown", (ev) => drag(ev, (dx, _dy, s) => {
+      cur[2] = Math.max(0.06, Math.min(1 - s[0], s[2] + dx));
+    }));
+    if (m.kind === "text") layerEl.append(sizer);
+    layerEl.append(bar);
+    place();
+    const onInput = () => place();
+    el.addEventListener("input", onInput);
     const fmtKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
       const k = e.key.toLowerCase();
@@ -1052,6 +1103,8 @@ export class WriteMode {
     el.addEventListener("keydown", fmtKey);
     el.addEventListener("blur", () => {
       bar.remove();
+      sizer.remove();
+      el.removeEventListener("input", onInput);
       el.removeEventListener("keydown", fmtKey);
     }, { once: true });
     el.addEventListener("blur", finish);

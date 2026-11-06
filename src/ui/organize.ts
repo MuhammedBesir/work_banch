@@ -27,12 +27,28 @@ function form(title: string, body: (HTMLElement | null)[], ok: string, read: () 
 
 export async function askFolder(current: string, existing: string[]): Promise<string | null> {
   const id = `folders-${Math.random().toString(36).slice(2)}`;
-  const input = h("input", { class: "cm-input", value: current, list: id, autofocus: true, "aria-label": "Klasör adı", placeholder: "örn. İstatistik" });
-  const v = await form("Klasöre taşı", [
-    h("label", { class: "cm-label", text: "Klasör (boş bırakırsan klasörden çıkar)" }), input,
+  const input = h("input", { class: "cm-input", value: current, list: id, autofocus: true, "aria-label": "Ders adı", placeholder: "örn. İstatistik" });
+  const v = await form("Derse taşı", [
+    h("label", { class: "cm-label", text: "Ders (boş bırakırsan dersten çıkar; yeni ad yazarsan ders oluşur)" }), input,
     h("datalist", { id }, ...existing.map((f) => h("option", { value: f }))),
     existing.length ? h("div", { class: "cm-form__chips" }, ...existing.map((f) => h("button", { type: "button", class: "cm-chip", onclick: () => (input.value = f) }, f))) : null,
   ], "Taşı", () => input.value.trim());
+  return v as string | null;
+}
+
+/** Ders (klasör) adı: yeni ders ya da yeniden adlandırma. */
+export async function askFolderName(title: string, current = "", ok = "Oluştur"): Promise<string | null> {
+  const input = h("input", { class: "cm-input", value: current, autofocus: true, "aria-label": "Ders adı", placeholder: "örn. İstatistik, Fizik 2, Lineer Cebir" });
+  const err = h("p", { class: "cm-muted", role: "alert", style: "margin:4px 0 0;color:var(--danger)", hidden: true });
+  const v = await form(title, [h("label", { class: "cm-label", text: "Ders adı" }), input, err], ok, () => {
+    const name = input.value.trim().replace(/\s+/g, " ");
+    if (!name) {
+      err.textContent = "Bir ad yaz.";
+      err.hidden = false;
+      return undefined;
+    }
+    return name.slice(0, 60);
+  });
   return v as string | null;
 }
 

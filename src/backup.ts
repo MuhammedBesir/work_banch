@@ -6,7 +6,7 @@ import type { Card, FileRecord, Highlight, Mark, Settings } from "./types";
 // ses kayıtları ve AI API anahtarı yedeğe girmez.
 
 /** Yedeğe giren dosya başına meta kayıtları. */
-const META_PREFIXES = ["quiz:", "hw:", "ocr:", "ai:"];
+const META_PREFIXES = ["quiz:", "hw:", "ocr:", "ai:", "folders"];
 
 export interface Backup {
   app: "calisma-masasi";
