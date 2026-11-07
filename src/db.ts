@@ -45,7 +45,43 @@ function wrap<T>(req: IDBRequest<T>): Promise<T> {
   });
 }
 
+// ---------- Otomatik kayıt göstergesi ----------
+// Her yazma işlemi sayılır: arayüz "Kaydediliyor… / Kaydedildi" gösterir, çıkışta bekleyen kayıtlar beklenir.
+export const saveState = new EventTarget();
+let pending = 0;
+let lastError: unknown = null;
+const idleWaiters: (() => void)[] = [];
+function track(tx: IDBTransaction): IDBTransaction {
+  pending++;
+  saveState.dispatchEvent(new Event("change"));
+  let done = false;
+  const end = (err?: unknown) => {
+    if (done) return;
+    done = true;
+    pending--;
+    if (err) lastError = err;
+    saveState.dispatchEvent(new Event("change"));
+    if (!pending) idleWaiters.splice(0).forEach((f) => f());
+  };
+  tx.addEventListener("complete", () => end());
+  tx.addEventListener("error", () => end(tx.error ?? new Error("Kayıt hatası")));
+  tx.addEventListener("abort", () => end(tx.error ?? new Error("Kayıt iptal")));
+  return tx;
+}
+/** Bekleyen yazma var mı; son hata (varsa). */
+export function saveStatus(): { pending: number; error: unknown } {
+  return { pending, error: lastError };
+}
+/** Bütün bekleyen kayıtlar bitince çözülür. */
+export function whenSaved(): Promise<void> {
+  return pending ? new Promise((resolve) => idleWaiters.push(resolve)) : Promise.resolve();
+}
+async function rw(name: string): Promise<IDBTransaction> {
+  return track((await open()).transaction(name, "readwrite"));
+}
+
 async function store(name: string, mode: IDBTransactionMode = "readonly") {
+  if (mode === "readwrite") return (await rw(name)).objectStore(name);
   return (await open()).transaction(name, mode).objectStore(name);
 }
 
@@ -80,7 +116,7 @@ export async function putHighlight(h: Highlight): Promise<void> {
 }
 
 export async function putHighlights(list: Highlight[]): Promise<void> {
-  const tx = (await open()).transaction("highlights", "readwrite");
+  const tx = await rw("highlights");
   const s = tx.objectStore("highlights");
   for (const h of list) s.put(h);
   await new Promise<void>((resolve, reject) => {
@@ -111,7 +147,7 @@ export async function putMark(m: Mark): Promise<void> {
 }
 
 export async function putMarks(list: Mark[]): Promise<void> {
-  const tx = (await open()).transaction("marks", "readwrite");
+  const tx = await rw("marks");
   const s = tx.objectStore("marks");
   for (const m of list) s.put(m);
   await new Promise<void>((resolve, reject) => {
@@ -133,7 +169,7 @@ export async function allCards(): Promise<Card[]> {
 }
 
 export async function putCards(list: Card[]): Promise<void> {
-  const tx = (await open()).transaction("cards", "readwrite");
+  const tx = await rw("cards");
   const s = tx.objectStore("cards");
   for (const c of list) s.put(c);
   await new Promise<void>((resolve, reject) => {
@@ -202,7 +238,7 @@ export async function moveFileData(from: string, to: string): Promise<void> {
   for (const name of ["highlights", "marks", "cards", "recordings"]) {
     const list: { fileHash: string }[] = await wrap(db.transaction(name).objectStore(name).index("fileHash").getAll(from));
     if (!list.length) continue;
-    const tx = db.transaction(name, "readwrite");
+    const tx = track(db.transaction(name, "readwrite"));
     for (const x of list) tx.objectStore(name).put({ ...x, fileHash: to });
     await new Promise<void>((resolve, reject) => {
       tx.oncomplete = () => resolve();
@@ -237,7 +273,7 @@ export async function saveSettings(s: Settings): Promise<void> {
 
 export async function clearAll(): Promise<void> {
   const stores = ["files", "highlights", "marks", "cards", "recordings", "meta"];
-  const tx = (await open()).transaction(stores, "readwrite");
+  const tx = track((await open()).transaction(stores, "readwrite"));
   for (const name of stores) tx.objectStore(name).clear();
   await new Promise<void>((resolve, reject) => {
     tx.oncomplete = () => resolve();

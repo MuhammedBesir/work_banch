@@ -137,10 +137,25 @@ test("Dersler: oluştur, sürükleyerek taşı, derse PDF ekle, kapaklar ve eri�
     const r = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
     expect(r.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)).toEqual([]);
   }
-  // Dersteyken açılan PDF o derse eklenir; kapatınca derse dönülür.
+  // Dersteyken açılan PDF o derse eklenir; çıkınca ana sayfaya dönülür.
   await dropPdf(page, "ders.pdf", "Hafta2.pdf");
   await expect(page.locator('.cm-page[data-page="0"] .textLayer span').first()).toBeAttached({ timeout: 20_000 });
   await page.getByRole("button", { name: "Kitaplığa dön" }).click();
-  await expect(page.getByRole("heading", { name: "Matematik", exact: true })).toBeVisible();
-  await expect(page.locator(".cm-cover")).toHaveCount(2);
+  await expect(page.getByRole("heading", { name: "Derslerim" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Matematik dersi, 2 PDF" })).toBeVisible();
+});
+
+test("Otomatik kayıt: yazarken çıkınca metin kaybolmaz, gösterge Kaydedildi der", async ({ page }) => {
+  await newNotebook(page);
+  await expect(page.locator(".cm-saved")).toContainText("Kaydedildi");
+  await page.keyboard.press("t");
+  const box = (await page.locator('.cm-page[data-page="0"]').boundingBox())!;
+  await page.mouse.click(box.x + 80, box.y + 200);
+  await page.keyboard.type("Bitirmeden çıkıyorum");
+  // Esc'e basmadan, yazarken çık: metin kaydedilir, ana sayfaya dönülür.
+  await page.getByRole("button", { name: "Kitaplığa dön" }).click();
+  await expect(page.getByRole("heading", { name: "Son açılanlar" })).toBeVisible();
+  await expect(page.getByText("Her şey kaydedildi.")).toBeVisible();
+  await page.getByRole("button", { name: /dosyasını aç$/ }).first().click();
+  await expect(page.locator(".cm-textbox", { hasText: "Bitirmeden çıkıyorum" })).toHaveCount(1, { timeout: 20_000 });
 });

@@ -13,7 +13,7 @@ export type { EditPage, Source };
 
 export interface EditorActions {
   /** Kaydedilen yeni kopya: çıktı ve sayfa haritası (hangi yeni sayfa hangi asıl sayfadan, kaç derece döndürülmüş). */
-  saved(out: Uint8Array, name: string, pages: EditPage[], sourceHashes: Map<string, string>): void;
+  saved(out: Uint8Array, name: string, pages: EditPage[], sourceHashes: Map<string, string>): void | Promise<void>;
   askPassword(name: string, wrong: boolean): Promise<string | null>;
 }
 
@@ -592,6 +592,11 @@ export class PageEditor {
     this.warnEl.textContent = links ? `Bu dosyadaki ${num(links)} iç bağlantı yeni kopyada çalışmayabilir.` : "";
   }
 
+  /** Çıkışta otomatik kayıt: bütün sayfaların düzenlenmiş kopyası. */
+  saveCopy(): Promise<void> {
+    return this.save(false);
+  }
+
   private async save(onlySelected: boolean): Promise<void> {
     const pages = onlySelected ? this.pages.filter((p) => this.selected.has(p.key)) : this.pages;
     if (!pages.length) {
@@ -604,7 +609,7 @@ export class PageEditor {
       const { buildPdf } = await import("./build"); // pdf-lib yalnızca kaydederken yüklenir
       const out = await buildPdf(pages, this.sources, this.outline);
       const hashes = new Map([...this.sources.values()].filter((x) => x.hash).map((x) => [x.id, x.hash!] as [string, string]));
-      this.actions.saved(out, name, pages, hashes);
+      await this.actions.saved(out, name, pages, hashes);
       if (!onlySelected) this.history = [];
       this.updateBars();
     } catch (err) {

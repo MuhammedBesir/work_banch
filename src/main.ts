@@ -1014,7 +1014,8 @@ async function openReader(file: OpenDoc): Promise<void> {
     h("div", { class: "cm-bar__group" },
       // PDF'ten çık: kitaplığa (ana ekran) dön. Değişiklikler zaten kayıtlı.
       h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--withicon cm-bar__home", title: "PDF'i kapat, kitaplığa dön", "aria-label": "Kitaplığa dön", onclick: () => void goHome() }, icon("back"), h("span", { class: "is-wide", text: "Kitaplık" })),
-      railBtn, fileBtn),
+      railBtn, fileBtn,
+      h("span", { class: "cm-saved is-wide", role: "status", title: "Vurgu, not, yazı ve çizimler her değişiklikte bu tarayıcıya kaydedilir" }, icon("check"), h("span", { text: "Kaydedildi" }))),
     modeSeg,
     h("span", { class: "cm-bar__sep is-reader" }),
     h("div", { class: "cm-bar__group is-reader", "aria-label": "Sayfa" },
@@ -1892,7 +1893,7 @@ async function setMode(mode: Mode): Promise<void> {
     r.search.el.hidden = true;
     const editor = new PageEditor(
       { id: "main", name: r.file.rec.name, bytes: r.file.bytes, doc: r.file.doc },
-      { saved: (out, name, pages, hashes) => void onEditorSaved(out, name, pages, hashes), askPassword: (n, w) => askPassword(n, w) },
+      { saved: (out, name, pages, hashes) => onEditorSaved(out, name, pages, hashes), askPassword: (n, w) => askPassword(n, w) },
       r.outline,
     );
     r.editor = editor;
@@ -1977,16 +1978,57 @@ async function onEditorSaved(out: Uint8Array, name: string, pages: EditPage[], s
   }, 10000);
 }
 
-async function goHome(): Promise<void> {
-  if (reader?.editor?.changes) {
-    await setMode("read");
-    if (reader?.editor) return;
+// Otomatik kayıt göstergesi: her yazma işleminde "Kaydediliyor…", bitince "Kaydedildi".
+let savedTimer = 0;
+db.saveState.addEventListener("change", () => {
+  const el = document.querySelector<HTMLElement>(".cm-saved");
+  if (!el) return;
+  const { pending, error } = db.saveStatus();
+  const label = el.lastElementChild as HTMLElement;
+  clearTimeout(savedTimer);
+  if (error) {
+    el.classList.add("is-error");
+    label.textContent = "Kaydedilemedi";
+    return;
   }
-  // PDF bir dersteyse kapatınca o derse dönülür.
-  const folder = reader?.file.rec.folder;
+  if (pending) {
+    el.classList.add("is-saving");
+    label.textContent = "Kaydediliyor…";
+    return;
+  }
+  // Çok kısa yazmalarda göz kırpmasın: kısa bir an sonra "Kaydedildi".
+  savedTimer = window.setTimeout(() => {
+    el.classList.remove("is-saving");
+    label.textContent = "Kaydedildi";
+  }, 350);
+});
+
+/**
+ * PDF'ten çık: önce her şey kaydedilir (yazılan metin kutusu ve not, Düzenle modundaki sayfa
+ * değişiklikleri kopya olarak, kaldığın sayfa), sonra ana sayfaya dönülür. Soru sorulmaz.
+ */
+async function goHome(): Promise<void> {
+  const r = reader;
+  if (r) {
+    r.write.finishEditing();
+    (document.activeElement as HTMLElement | null)?.blur?.(); // açık not kutusu blur'da kaydolur
+    const editorChanges = r.editor?.changes ?? 0;
+    if (r.editor && editorChanges) {
+      await r.editor.saveCopy();
+      if (r.editor.changes) {
+        // Kopya oluşturulamadı (ör. parolalı dosya): değişiklik kaybolmasın diye çıkmadan haber ver.
+        toast("Düzenle modundaki değişiklikler kaydedilemedi; çıkmadan önce kontrol et.", undefined, 6000);
+        return;
+      }
+    }
+    await db.putFile({ ...r.file.rec, lastOpened: Date.now() });
+    await db.whenSaved();
+    if (reader !== r) return;
+  }
   closeReader();
   await showHome();
-  if (folder) home?.showFolder(folder);
+  const { error } = db.saveStatus();
+  if (!error) toast("Her şey kaydedildi.");
 }
 
 // ---------- Vurgular ----------
@@ -2804,6 +2846,11 @@ window.addEventListener("drop", (e) => {
     const handle = await handlePromise;
     await openFile(file, handle?.kind === "file" ? (handle as FsHandle) : undefined);
   })();
+});
+
+// Kayıt sürerken ya da Düzenle modunda kaydedilmemiş sayfa değişikliği varken sekme kapatılırsa uyar.
+window.addEventListener("beforeunload", (e) => {
+  if (db.saveStatus().pending || reader?.editor?.changes) e.preventDefault();
 });
 
 // Sayfa kapanırken kaldığın yer kaydedilsin.
