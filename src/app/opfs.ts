@@ -2,7 +2,7 @@ import * as db from "../db";
 
 // Firefox ve Safari'de dosya tutamacı saklanamaz; "Son açılanlar"dan yeniden açabilmek için
 // PDF'in bir kopyası tarayıcıda tutulur: OPFS'te, OPFS'e yazılamıyorsa (Safari'de createWritable yok)
-// IndexedDB'de (meta "copy:<hash>", Blob olarak). Kota sınırlıdır: büyük dosyalar ve kota dolmak
+// IndexedDB'de (meta "copy:<hash>", ArrayBuffer olarak: Safari'nin gizli penceresi Blob saklamaz). Kota sınırlıdır: büyük dosyalar ve kota dolmak
 // üzereyken kopya alınmaz, "Dosyayı yeniden seç" kalır.
 
 const DIR = "pdf";
@@ -27,7 +27,8 @@ export const opfsSupported = (): boolean => typeof indexedDB !== "undefined" || 
 export async function saveCopy(hash: string, bytes: Uint8Array): Promise<boolean> {
   if (bytes.byteLength > MAX_FILE || !bytes.byteLength) return false;
   // Bayt dizisi pdf.js'e aktarılınca boşalabilir: ilk await'ten önce kendi kopyamızı al.
-  const blob = new Blob([bytes.slice() as unknown as BlobPart], { type: "application/pdf" });
+  const buf = bytes.slice().buffer as ArrayBuffer;
+  const blob = new Blob([buf], { type: "application/pdf" });
   try {
     const est = await navigator.storage?.estimate?.();
     if (est?.quota && (est.usage ?? 0) + blob.size > est.quota * 0.6) return false;
@@ -36,7 +37,7 @@ export async function saveCopy(hash: string, bytes: Uint8Array): Promise<boolean
   }
   if (await saveOpfs(hash, blob)) return true;
   try {
-    await db.putMeta(IDB + hash, blob);
+    await db.putMeta(IDB + hash, buf);
     return true;
   } catch {
     return false;
@@ -72,8 +73,11 @@ async function opfsFile(hash: string): Promise<File | null> {
 }
 
 export async function readCopy(hash: string, name: string): Promise<File | null> {
-  const f = (await opfsFile(hash)) ?? (await db.getMeta<Blob>(IDB + hash).catch(() => undefined));
-  return f && f.size > 0 ? new File([f], name, { type: "application/pdf" }) : null;
+  const f = await opfsFile(hash);
+  if (f) return new File([f], name, { type: "application/pdf" });
+  const b = await db.getMeta<ArrayBuffer | Blob>(IDB + hash).catch(() => undefined);
+  const size = b instanceof Blob ? b.size : b?.byteLength ?? 0;
+  return b && size > 0 ? new File([b], name, { type: "application/pdf" }) : null;
 }
 
 export async function hasCopy(hash: string): Promise<boolean> {
@@ -109,10 +113,11 @@ export async function copiesUsage(): Promise<{ count: number; bytes: number }> {
   }
   try {
     for (const k of await db.metaKeys(IDB)) {
-      const b = await db.getMeta<Blob>(k);
-      if (!b?.size) continue;
+      const b = await db.getMeta<ArrayBuffer | Blob>(k);
+      const size = b instanceof Blob ? b.size : b?.byteLength ?? 0;
+      if (!size) continue;
       count++;
-      bytes += b.size;
+      bytes += size;
     }
   } catch {
     /* sayılamadı */
