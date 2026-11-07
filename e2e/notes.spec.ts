@@ -153,9 +153,24 @@ test("Otomatik kayıt: yazarken çıkınca metin kaybolmaz, gösterge Kaydedildi
   await page.mouse.click(box.x + 80, box.y + 200);
   await page.keyboard.type("Bitirmeden çıkıyorum");
   // Esc'e basmadan, yazarken çık: metin kaydedilir, ana sayfaya dönülür.
-  await page.getByRole("button", { name: "Kitaplığa dön" }).click();
+  // Düğmeye JS ile basılır: odak metin kutusunda kalır (Safari'deki gibi), kayıt odağa bağlı olmamalı.
+  await page.getByRole("button", { name: "Kitaplığa dön" }).evaluate((b) => (b as HTMLButtonElement).click());
   await expect(page.getByRole("heading", { name: "Son açılanlar" })).toBeVisible();
   await expect(page.getByText("Her şey kaydedildi.")).toBeVisible();
   await page.getByRole("button", { name: /dosyasını aç$/ }).first().click();
   await expect(page.locator(".cm-textbox", { hasText: "Bitirmeden çıkıyorum" })).toHaveCount(1, { timeout: 20_000 });
+});
+
+test("Otomatik kayıt: yazarken sayfa kapanırsa (yenilenirse) metin kaybolmaz", async ({ page }) => {
+  await newNotebook(page);
+  await page.keyboard.press("t");
+  const box = (await page.locator('.cm-page[data-page="0"]').boundingBox())!;
+  await page.mouse.click(box.x + 80, box.y + 200);
+  await page.keyboard.type("Sekme kapandı");
+  // Yazmayı bitirmeden: otomatik kayıt (~0,5 sn) beklenir, sonra sayfa yenilenir.
+  await expect(page.locator(".cm-saved")).toContainText("Kaydedildi", { timeout: 5_000 });
+  await page.waitForTimeout(1_200);
+  await page.reload();
+  await page.getByRole("button", { name: /dosyasını aç$/ }).first().click();
+  await expect(page.locator(".cm-textbox", { hasText: "Sekme kapandı" })).toHaveCount(1, { timeout: 20_000 });
 });

@@ -51,9 +51,11 @@ export const saveState = new EventTarget();
 let pending = 0;
 let lastError: unknown = null;
 const idleWaiters: (() => void)[] = [];
-function track(tx: IDBTransaction): IDBTransaction {
-  pending++;
-  saveState.dispatchEvent(new Event("change"));
+function track(tx: IDBTransaction, counted = false): IDBTransaction {
+  if (!counted) {
+    pending++;
+    saveState.dispatchEvent(new Event("change"));
+  }
   let done = false;
   const end = (err?: unknown) => {
     if (done) return;
@@ -76,8 +78,21 @@ export function saveStatus(): { pending: number; error: unknown } {
 export function whenSaved(): Promise<void> {
   return pending ? new Promise((resolve) => idleWaiters.push(resolve)) : Promise.resolve();
 }
+/** Yazma, veritabanı açılmayı beklerken de "bekleyen" sayılır: whenSaved() onu da bekler. */
 async function rw(name: string): Promise<IDBTransaction> {
-  return track((await open()).transaction(name, "readwrite"));
+  pending++;
+  saveState.dispatchEvent(new Event("change"));
+  let db: IDBDatabase;
+  try {
+    db = await open();
+  } catch (err) {
+    pending--;
+    lastError = err;
+    saveState.dispatchEvent(new Event("change"));
+    if (!pending) idleWaiters.splice(0).forEach((f) => f());
+    throw err;
+  }
+  return track(db.transaction(name, "readwrite"), true);
 }
 
 async function store(name: string, mode: IDBTransactionMode = "readonly") {

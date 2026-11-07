@@ -41,6 +41,8 @@ export interface WriteActions {
   marks(): Mark[];
   add(m: Mark): void;
   update(m: Mark): void;
+  /** Katmanı yeniden çizmeden yalnızca kaydet (yazarken otomatik kayıt). */
+  persist?(m: Mark): void;
   remove(id: string): void;
   /** Sayfanın işaret katmanını yeniden çiz (seçim/araç değişince). */
   redraw(page: number): void;
@@ -71,6 +73,8 @@ export class WriteMode {
   /** Seçili işaretler (`Shift` + tıklama ile çoklu seçim). */
   readonly selected = new Set<string>();
   editingId: string | null = null;
+  /** Açık metin kutusunu odağa bakmadan bitirir (Safari düğmeye basınca odağı taşımaz). */
+  private finishCurrent: (() => void) | null = null;
   private undoStack: Op[][] = [];
   private redoStack: Op[][] = [];
   private active = false;
@@ -1007,13 +1011,16 @@ export class WriteMode {
     getSelection()?.addRange(range);
 
     const before = m;
+    this.finishCurrent = () => finish();
     /** Düzenlerken taşınan / genişliği değişen kutunun güncel yeri (0–1). */
     const cur: [number, number, number] = [m.box[0], m.box[1], m.box[2]];
     const finish = () => {
       el.removeEventListener("blur", finish);
       el.removeEventListener("keydown", onKey);
+      clearTimeout(saveTimer);
       if (this.editingId !== id) return;
       this.editingId = null;
+      this.finishCurrent = null;
       this.renderPalette();
       const text = el.innerText.replace(/\n+$/, "").trim();
       const pageEl = this.viewer.pageElement(m.page);
@@ -1089,7 +1096,20 @@ export class WriteMode {
     if (m.kind === "text") layerEl.append(sizer);
     layerEl.append(bar);
     place();
-    const onInput = () => place();
+    // Yazarken otomatik kayıt: her duraklamada (~0,5 sn) metin kaydedilir; sekme kapansa da kaybolmaz.
+    let saveTimer = 0;
+    const autosave = () => {
+      clearTimeout(saveTimer);
+      const text = el.innerText.replace(/\n+$/, "").trim();
+      if (!text || this.editingId !== id) return;
+      const fs = host!.style.getPropertyValue("--fs");
+      this.actions.persist?.({ ...before, text, ...(before.kind === "text" && fs ? { size: parseFloat(fs) } : {}), box: [cur[0], cur[1], cur[2], before.box[3]], updatedAt: Date.now() } as Mark);
+    };
+    const onInput = () => {
+      place();
+      clearTimeout(saveTimer);
+      saveTimer = window.setTimeout(autosave, 500);
+    };
     el.addEventListener("input", onInput);
     const fmtKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
@@ -1123,6 +1143,10 @@ export class WriteMode {
 
   finishEditing(): void {
     if (!this.editingId) return;
+    const el = this.viewer.root.querySelector<HTMLElement>("[contenteditable]");
+    this.finishCurrent?.();
+    // Biçim çubuğu ve tutamaçlar blur'da kalkar; odak başka yerdeyse de kutuyu bırak.
+    el?.blur();
     (document.activeElement as HTMLElement | null)?.blur?.();
   }
 }

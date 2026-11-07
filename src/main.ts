@@ -1132,6 +1132,10 @@ async function openReader(file: OpenDoc): Promise<void> {
     marks: () => marks,
     add: addMark,
     update: updateMark,
+    persist: (m) => {
+      marks = marks.map((x) => (x.id === m.id ? m : x));
+      void db.putMark(m);
+    },
     remove: removeMark,
     redraw: drawMarks,
     pen: (pen) => void changeSettings({ ...settings, pen }),
