@@ -202,6 +202,16 @@ export async function getMeta<T>(key: string): Promise<T | undefined> {
   return wrap((await store("meta")).get(key));
 }
 
+export async function deleteMeta(key: string): Promise<void> {
+  await wrap((await store("meta", "readwrite")).delete(key));
+}
+
+/** Önekle başlayan meta anahtarları. */
+export async function metaKeys(prefix: string): Promise<string[]> {
+  const keys = (await wrap((await store("meta")).getAllKeys())) as IDBValidKey[];
+  return keys.filter((k): k is string => typeof k === "string" && k.startsWith(prefix));
+}
+
 export async function putMeta(key: string, value: unknown): Promise<void> {
   await wrap((await store("meta", "readwrite")).put(value, key));
 }

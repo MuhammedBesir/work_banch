@@ -2,34 +2,6 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import { collectErrors, dropPdf } from "./helpers";
 
-/** Teşhis: CI'da (özellikle WebKit) yeniden açılışta işaret görünmezse durumu günlüğe yaz. */
-async function dumpState(page: Page, label: string): Promise<void> {
-  const info = await page.evaluate(async () => {
-    const open = () => new Promise<IDBDatabase>((res, rej) => { const r = indexedDB.open("calisma-masasi"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
-    let files: unknown = "?";
-    let marks: unknown = "?";
-    try {
-      const db = await open();
-      const all = (name: string) => new Promise<unknown[]>((res) => { const r = db.transaction(name).objectStore(name).getAll(); r.onsuccess = () => res(r.result); r.onerror = () => res([]); });
-      files = (await all("files")).map((f) => { const x = f as { hash: string; name: string; pageCount: number }; return `${x.name}:${x.hash.slice(0, 8)}:${x.pageCount}`; });
-      marks = (await all("marks")).map((m) => { const x = m as { kind: string; fileHash: string; text?: string; page: number }; return `${x.kind}@${x.fileHash.slice(0, 8)}/p${x.page}:${x.text ?? ""}`; });
-    } catch (e) {
-      files = String(e);
-    }
-    return {
-      dbNames: (await indexedDB.databases?.())?.map((d) => d.name),
-      files, marks,
-      title: document.title,
-      pages: document.querySelectorAll(".cm-page").length,
-      markLayers: document.querySelectorAll(".cm-page__marks").length,
-      textboxes: [...document.querySelectorAll(".cm-textbox")].map((e) => e.textContent),
-      toasts: [...document.querySelectorAll(".cm-toast")].map((e) => e.textContent),
-      body: document.body.innerText.slice(0, 300),
-    };
-  });
-  console.log(`[dump ${label}]`, JSON.stringify(info));
-}
-
 async function newNotebook(page: Page): Promise<void> {
   await page.goto("/");
   await page.getByRole("button", { name: "Yeni not defteri" }).click();
@@ -185,10 +157,7 @@ test("Otomatik kayıt: yazarken çıkınca metin kaybolmaz, gösterge Kaydedildi
   await page.getByRole("button", { name: "Kitaplığa dön" }).evaluate((b) => (b as HTMLButtonElement).click());
   await expect(page.getByRole("heading", { name: "Son açılanlar" })).toBeVisible();
   await expect(page.getByText("Her şey kaydedildi.")).toBeVisible();
-  await dumpState(page, "exit:before-reopen");
   await page.getByRole("button", { name: /dosyasını aç$/ }).first().click();
-  await page.waitForTimeout(3_000);
-  await dumpState(page, "exit:after-reopen");
   await expect(page.locator(".cm-textbox", { hasText: "Bitirmeden çıkıyorum" })).toHaveCount(1, { timeout: 20_000 });
 });
 
@@ -201,10 +170,23 @@ test("Otomatik kayıt: yazarken sayfa kapanırsa (yenilenirse) metin kaybolmaz",
   // Yazmayı bitirmeden: otomatik kayıt (~0,5 sn) beklenir, sonra sayfa yenilenir.
   await expect(page.locator(".cm-saved")).toContainText("Kaydedildi", { timeout: 5_000 });
   await page.waitForTimeout(1_200);
-  await dumpState(page, "reload:before");
   await page.reload();
   await page.getByRole("button", { name: /dosyasını aç$/ }).first().click();
-  await page.waitForTimeout(3_000);
-  await dumpState(page, "reload:after-reopen");
   await expect(page.locator(".cm-textbox", { hasText: "Sekme kapandı" })).toHaveCount(1, { timeout: 20_000 });
+});
+
+// Safari'de OPFS'e yazılamaz (createWritable yok): kopya IndexedDB'ye düşer, son açılanlardan yine açılır.
+test("Safari durumu: createWritable yokken de son açılanlardan yeniden açılır", async ({ page }) => {
+  await page.addInitScript(() => {
+    const proto = (globalThis as { FileSystemFileHandle?: { prototype: Record<string, unknown> } }).FileSystemFileHandle?.prototype;
+    if (proto) delete proto.createWritable;
+  });
+  await newNotebook(page);
+  await page.keyboard.press("t");
+  const box = (await page.locator('.cm-page[data-page="0"]').boundingBox())!;
+  await page.mouse.click(box.x + 80, box.y + 200);
+  await page.keyboard.type("Safari notu");
+  await page.getByRole("button", { name: "Kitaplığa dön" }).click();
+  await page.getByRole("button", { name: /dosyasını aç$/ }).first().click();
+  await expect(page.locator(".cm-textbox", { hasText: "Safari notu" })).toHaveCount(1, { timeout: 20_000 });
 });
