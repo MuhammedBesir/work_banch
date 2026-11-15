@@ -123,11 +123,11 @@ test("Dersler: oluştur, sürükleyerek taşı, derse PDF ekle, kapaklar ve eri�
   // Kitaplığa dön, dosyayı ders kartına sürükle.
   await page.getByRole("button", { name: "Kitaplık" }).click();
   await expect(page.getByRole("button", { name: "Matematik dersi, 0 PDF" })).toBeVisible();
-  await page.locator(".cm-table tbody tr").first().dragTo(page.getByRole("button", { name: /Matematik dersi/ }));
+  await page.locator(".cm-file").first().dragTo(page.getByRole("button", { name: /Matematik dersi/ }));
   await expect(page.getByRole("button", { name: "Matematik dersi, 1 PDF" })).toBeVisible();
   // Dersin içinde dosya listelenir; menüden de taşınabilir.
   await page.getByRole("button", { name: "Matematik dersi, 1 PDF" }).click();
-  await expect(page.locator(".cm-table tbody tr")).toHaveCount(1);
+  await expect(page.locator(".cm-file")).toHaveCount(1);
   await page.getByRole("button", { name: /düzenle$/ }).first().click();
   await expect(page.getByRole("menuitem", { name: "Dersten çıkar" })).toBeVisible();
   await page.keyboard.press("Escape");

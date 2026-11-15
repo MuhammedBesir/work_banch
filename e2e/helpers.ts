@@ -17,7 +17,7 @@ export async function dropPdf(page: Page, fixtureName: string, as = fixtureName)
 
 export async function openSample(page: Page): Promise<void> {
   await page.goto("/");
-  await expect(page.locator(".cm-drop")).toBeVisible();
+  await expect(page.locator(".cm-drop, .cm-lib__head").first()).toBeVisible();
   await dropPdf(page, "ders.pdf", "IST201_Bolum4.pdf");
   await expect(page.locator('.cm-page[data-page="0"] .textLayer span').first()).toBeAttached({ timeout: 20_000 });
 }

@@ -36,6 +36,15 @@ export interface HomeActions {
 
 const DRAG_TYPE = "application/x-cm-file";
 
+/** Ders kartının rengi: ada göre sabit (6 ton), kullanıcı kapak rengi seçtiyse o. */
+const COURSE_HUES = [212, 262, 330, 20, 150, 45];
+function courseHue(name: string): number {
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.codePointAt(0)!) >>> 0;
+  return COURSE_HUES[h % COURSE_HUES.length];
+}
+const PROGRESS_MIN = 0.04;
+
 export interface HomeError {
   title: string;
   text: string;
@@ -82,7 +91,14 @@ export class Home {
       ),
       h("p", { class: "cm-trust cm-drop__trust", text: TRUST }),
     );
-    this.dropSlot.replaceChildren(this.drop);
+    this.syncDrop();
+  }
+
+  /** Kitaplıkta dosya ya da ders varsa karşılama kartı gizlenir; eylemler başlıkta. Yükleme/hata kartları her zaman görünür. */
+  private syncDrop(): void {
+    const idle = !!this.drop.querySelector(".cm-drop__actions");
+    const hasContent = this.rows.length > 0 || this.folders.length > 0;
+    this.dropSlot.replaceChildren(...(idle && hasContent ? [] : [this.drop]));
   }
 
   showOver(name: string, size: string): void {
@@ -166,12 +182,13 @@ export class Home {
     this.rows = rows;
     const title = this.drop.querySelector(".cm-display");
     if (title && this.drop.querySelector(".cm-drop__actions")) title.textContent = this.dropTitle();
-    // Dosya varken bırakma alanı tek satırlık kompakt karta dönüşür; liste öne çıkar.
-    this.recent.parentElement?.classList.toggle("has-recent", rows.length > 0);
     const foot = h("p", { class: "cm-muted cm-recent__foot", text: "Vurgular bu tarayıcıda saklanır. Tarayıcı verilerini silersen kaybolur; düzenli olarak yedek al ya da Markdown'a aktar." });
     // Boş dersler de görünür (ders önce oluşturulup PDF'ler sonra eklenebilir).
     const folders = [...new Set([...knownFolders, ...rows.map((r) => r.rec.folder).filter((f): f is string => !!f)])].sort((a, b) => a.localeCompare(b, "tr"));
     this.folders = folders;
+    // Dosya ya da ders varsa kitaplık düzeni: karşılama kartı yerine başlık + eylemler.
+    this.recent.parentElement?.classList.toggle("has-recent", rows.length > 0 || folders.length > 0);
+    this.syncDrop();
     if (!rows.length && !folders.length) {
       foot.classList.add("is-alone");
       this.recent.replaceChildren(foot);
@@ -218,7 +235,20 @@ export class Home {
               h("p", { style: "margin:0;font-weight:600", text: "Bu derste henüz PDF yok" }),
               h("p", { class: "cm-muted", style: "margin:0", text: "\"PDF ekle\" ile seç ya da PDF'i bu sayfaya sürükleyip bırak; bu derse eklenir. Kitaplıktaki bir dosyayı da ders kartına sürükleyebilirsin." }))
           : h("p", { class: "cm-muted", text: "Bu filtrede dosya yok." }))
-      : this.actions.view === "grid" ? this.grid(shown) : this.table(shown);
+      : this.actions.view === "grid" ? this.grid(shown) : this.list(shown, !!inFolder);
+
+    // Hızlı eylemler (başlıkta): PDF aç, yeni ders, not defteri, paket.
+    const quick = (primaryLabel: string) => h("div", { class: "cm-lib__actions" },
+      h("button", { class: "cm-btn cm-btn--primary cm-btn--withicon cm-lib__primary", title: `${primaryLabel} (Ctrl O)`, onclick: () => this.actions.pick() }, icon("plus"), h("span", { text: primaryLabel }), kbd("Ctrl O")),
+      h("button", { class: "cm-btn cm-btn--withicon", title: "Yeni ders", onclick: async () => {
+        const n = await this.actions.createFolder();
+        if (n) this.go(n);
+      } }, icon("folder"), h("span", { class: "is-wide", text: "Yeni ders" })),
+      h("button", { class: "cm-btn cm-btn--withicon", title: "Yeni not defteri", onclick: () => this.actions.newNotebook() }, icon("notebook"), h("span", { class: "is-wide", text: "Not defteri" })),
+      h("button", { class: "cm-btn cm-btn--withicon", title: "Paylaşım paketi aç", onclick: () => this.actions.importBundle() }, icon("package"), h("span", { class: "is-wide", text: "Paket aç" })),
+    );
+    const totalHl = rows.reduce((a, r) => a + r.highlights, 0);
+    const joinStats = (parts: (string | null)[]) => parts.filter(Boolean).join(" · ");
 
     if (inFolder) {
       // Dersin içi: geri, ders adı, PDF ekle, ders menüsü.
@@ -235,19 +265,29 @@ export class Home {
           if (await this.actions.deleteFolder(inFolder)) this.folder = "*";
         } },
       ], "right"));
-      const count = rows.filter((r) => r.rec.folder === inFolder).length;
+      const inRows = rows.filter((r) => r.rec.folder === inFolder);
+      const fHl = inRows.reduce((a, r) => a + r.highlights, 0);
+      const last = Math.max(0, ...inRows.map((r) => r.rec.lastOpened));
+      const tile = h("span", { class: "cm-ctile cm-ctile--lg", "aria-hidden": "true" }, icon("folder"));
+      tile.style.setProperty("--hue", String(courseHue(inFolder)));
       this.recent.replaceChildren(
-        back,
-        h("div", { class: "cm-recent__head cm-folder__head" },
-          h("div", { class: "cm-folder__title" },
-            h("span", { class: "cm-folder__icon", "aria-hidden": "true" }, icon("folder")),
-            h("h2", { id: "recent-h", tabindex: "-1", text: inFolder }),
-            h("span", { class: "cm-muted cm-num", text: `${num(count)} PDF` })),
-          h("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap" }, search, view,
-            h("button", { class: "cm-btn cm-btn--primary cm-btn--sm cm-btn--withicon", onclick: () => this.actions.pick() }, icon("plus"), "PDF ekle"),
+        h("header", { class: "cm-lib__head" },
+          h("div", { class: "cm-lib__title" },
+            back,
+            h("div", { class: "cm-lib__name" },
+              tile,
+              h("div", {},
+                h("h2", { id: "recent-h", tabindex: "-1", class: "cm-lib__h", text: inFolder }),
+                h("p", { class: "cm-lib__sub", text: joinStats([`${num(inRows.length)} PDF`, fHl ? `${num(fHl)} vurgu` : null, last ? `son çalışma ${relative(last)}` : null, "PDF'leri buraya sürükleyebilirsin"]) }))),
+          ),
+          h("div", { class: "cm-lib__actions" },
+            h("button", { class: "cm-btn cm-btn--primary cm-btn--withicon cm-lib__primary", onclick: () => this.actions.pick() }, icon("plus"), h("span", { text: "PDF ekle" })),
             more),
         ),
-        ...(filters ? [filters] : []),
+        h("div", { class: "cm-recent__head cm-lib__tools" },
+          h("div", { class: "cm-lib__filters" }, ...(filters ? [filters] : [])),
+          h("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap" }, search, view),
+        ),
         content,
         foot,
       );
@@ -261,35 +301,55 @@ export class Home {
     };
     const card = (f: string) => {
       const s = stats(f);
+      const list = rows.filter((r) => r.rec.folder === f).sort((a, b) => b.rec.lastOpened - a.rec.lastOpened);
+      const tile = h("span", { class: "cm-ctile", "aria-hidden": "true" }, icon("folder"));
+      tile.style.setProperty("--hue", String(courseHue(f)));
+      // Sağda en son çalışılan üç PDF'in kapakları yelpaze gibi.
+      const stack = h("span", { class: "cm-foldercard__stack", "aria-hidden": "true" });
+      list.slice(0, 3).forEach((r, i) => {
+        const cover = h("span", { class: "cm-foldercard__cover" });
+        cover.style.setProperty("--i", String(i));
+        if (!r.rec.lock) void this.actions.thumb(r.rec.hash).then((src) => src && cover.replaceChildren(h("img", { src, alt: "" })));
+        stack.append(cover);
+      });
       const b = h("button", { class: "cm-foldercard", onclick: () => this.go(f), "aria-label": `${f} dersi, ${s.files} PDF` },
-        h("span", { class: "cm-foldercard__icon", "aria-hidden": "true" }, icon("folder")),
-        h("span", { class: "cm-foldercard__name", text: f }),
-        h("span", { class: "cm-foldercard__meta cm-muted", text: s.files ? `${num(s.files)} PDF${s.hl ? ` · ${num(s.hl)} vurgu` : ""}` : "Boş" }),
+        h("span", { class: "cm-foldercard__body" },
+          tile,
+          h("span", { class: "cm-foldercard__name", text: f }),
+          h("span", { class: "cm-foldercard__meta", text: s.files ? joinStats([`${num(s.files)} PDF`, s.hl ? `${num(s.hl)} vurgu` : null, s.last ? relative(s.last) : null]) : "Henüz PDF yok" }),
+        ),
+        list.length ? stack : null,
       );
       this.dropTarget(b, f);
       return h("li", {}, b);
     };
+    const newCard = h("li", {}, h("button", { class: "cm-foldercard cm-foldercard--new", onclick: async () => {
+      const n = await this.actions.createFolder();
+      if (n) this.go(n);
+    } },
+      h("span", { class: "cm-foldercard__body" },
+        h("span", { class: "cm-ctile cm-ctile--new", "aria-hidden": "true" }, icon("plus")),
+        h("span", { class: "cm-foldercard__name", text: "Yeni ders" }),
+        h("span", { class: "cm-foldercard__meta", text: "PDF'lerini bir arada tut" }))));
     const courses = h("section", { class: "cm-courses", "aria-labelledby": "courses-h" },
-      h("div", { class: "cm-recent__head" },
+      h("div", { class: "cm-lib__sect" },
         h("h2", { id: "courses-h", text: "Derslerim" }),
-        folders.length ? h("span", { class: "cm-muted cm-courses__hint", style: "font-size:13px", text: "PDF'i bir derse sürükleyerek taşıyabilirsin" }) : null),
-      h("ul", { class: "cm-foldergrid", role: "list" },
-        ...folders.map(card),
-        h("li", {}, h("button", { class: "cm-foldercard cm-foldercard--new", onclick: async () => {
-          const n = await this.actions.createFolder();
-          if (n) this.go(n);
-        } },
-          h("span", { class: "cm-foldercard__icon", "aria-hidden": "true" }, icon("plus")),
-          h("span", { class: "cm-foldercard__name", text: "Yeni ders" }),
-          h("span", { class: "cm-foldercard__meta cm-muted", text: "PDF'lerini bir arada tut" }))),
-      ),
+        folders.length ? h("span", { class: "cm-lib__hint cm-courses__hint", text: "Bir PDF'i ders kartına sürükleyerek taşıyabilirsin" }) : null),
+      h("ul", { class: "cm-foldergrid", role: "list" }, ...folders.map(card), newCard),
     );
+    const lastAll = Math.max(0, ...rows.map((r) => r.rec.lastOpened));
     this.recent.replaceChildren(
+      h("header", { class: "cm-lib__head" },
+        h("div", { class: "cm-lib__title" },
+          h("h1", { class: "cm-lib__h cm-lib__h--main", text: "Kitaplık" }),
+          h("p", { class: "cm-lib__sub", text: joinStats([folders.length ? `${num(folders.length)} ders` : null, `${num(rows.length)} PDF`, totalHl ? `${num(totalHl)} vurgu` : null, lastAll ? `son çalışma ${relative(lastAll)}` : null]) || "PDF'ini buraya sürükle ya da seç" })),
+        quick("PDF aç"),
+      ),
       courses,
       ...(rows.length ? [
-        h("div", { class: "cm-recent__head" },
+        h("div", { class: "cm-lib__sect cm-lib__tools" },
           h("h2", { id: "recent-h", text: "Son açılanlar" }),
-          h("div", { style: "display:flex;gap:8px;align-items:center" }, search, view,
+          h("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap" }, search, view,
             h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm", onclick: () => this.actions.clearRecent() }, "Listeyi temizle")),
         ),
         ...(filters ? [filters] : []),
@@ -342,12 +402,6 @@ export class Home {
     openMenu(anchor, items, "right");
   }
 
-  private openButton(row: RecentRow): HTMLElement {
-    return row.reachable
-      ? h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm", onclick: () => this.actions.openRecent(row), "aria-label": `${row.rec.name} dosyasını aç` }, row.rec.lock ? "Kilidi aç" : "Aç")
-      : h("button", { class: "cm-btn cm-btn--sm", onclick: () => this.actions.openRecent(row) }, "Dosyayı yeniden seç");
-  }
-
   private more(rec: FileRecord): HTMLElement {
     const b = h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm", "aria-label": `${rec.name}: düzenle`, "aria-haspopup": "menu", title: "Sabitle, klasör, etiket, kapak, kilit" }, "⋯");
     b.addEventListener("click", (e) => (e.stopPropagation(), this.menu(b, rec)));
@@ -363,36 +417,46 @@ export class Home {
     ];
   }
 
-  private table(rows: RecentRow[]): HTMLElement {
-    const body = h("tbody");
+  /** Liste görünümü: kapak, ad ve ikinci satırda ders · kaldığın yer · vurgu; ince ilerleme çubuğu; sağda zaman ve menü. */
+  private list(rows: RecentRow[], inFolder: boolean): HTMLElement {
+    const ul = h("ul", { class: "cm-files", role: "list" });
     for (const row of rows) {
       const { rec } = row;
-      const name = h("td", {}, h("div", { style: "font-weight:500;overflow-wrap:anywhere;display:flex;gap:6px;align-items:center;flex-wrap:wrap" }, h("span", { text: rec.name }), ...this.badges(rec)));
-      if (rec.aliases?.length) name.append(h("div", { class: "cm-muted cm-recent__lost", text: `Diğer adları: ${rec.aliases.join(", ")}` }));
-      if (!row.reachable) {
-        name.append(h("div", { class: "cm-muted cm-recent__lost", text: "Tarayıcı bu dosyaya erişimi bıraktı. Aynı dosyayı seçince vurgular geri gelir." }));
-      }
-      const tr = h("tr", {},
-          name,
-          h("td", { style: "white-space:nowrap" }, h("span", { class: "cm-num", text: `Sayfa ${num(rec.lastPage + 1)} / ${num(rec.pageCount)}` })),
-          h("td", { style: "white-space:nowrap" },
-            row.highlights ? h("span", {}, h("span", { class: "cm-num", text: num(row.highlights) }), " vurgu") : h("span", { class: "cm-muted", text: "Vurgu yok" }),
-          ),
-          h("td", { class: "cm-muted", style: "white-space:nowrap", text: relative(rec.lastOpened) }),
-          h("td", { style: "white-space:nowrap" }, this.openButton(row), this.more(rec)),
-        );
-      this.draggable(tr, rec);
-      body.append(tr);
+      const cover = h("span", { class: "cm-file__thumb", "aria-hidden": "true" }, h("span", { class: "cm-file__initial", text: rec.name.replace(/\.pdf$/i, "").slice(0, 1).toUpperCase() }));
+      if (rec.cover) cover.style.setProperty("--cover", rec.cover);
+      if (rec.lock) cover.append(h("span", { class: "cm-file__lock", text: "🔒" }));
+      else void this.actions.thumb(rec.hash).then((src) => src && cover.replaceChildren(h("img", { src, alt: "" })));
+      const ratio = rec.pageCount ? Math.min(1, (rec.lastPage + 1) / rec.pageCount) : 0;
+      const meta = [
+        !inFolder && rec.folder ? rec.folder : null,
+        `Sayfa ${num(rec.lastPage + 1)} / ${num(rec.pageCount)}`,
+        row.highlights ? `${num(row.highlights)} vurgu` : null,
+        ...(rec.tags ?? []).map((t) => `#${t}`),
+      ].filter(Boolean).join(" · ");
+      const body = h("span", { class: "cm-file__body" },
+        h("span", { class: "cm-file__name" },
+          rec.pinned ? h("span", { class: "cm-file__pin", title: "Sabitlendi", "aria-label": "sabitlendi", text: "★" }) : null,
+          h("span", { text: rec.name.replace(/\.pdf$/i, "") })),
+        h("span", { class: "cm-file__meta", text: meta }),
+        h("span", { class: "cm-file__bar" }, h("span", { class: `cm-file__fill${ratio >= 0.999 ? " is-done" : ""}`, style: `width:${Math.max(PROGRESS_MIN, ratio) * 100}%` })),
+        rec.aliases?.length ? h("span", { class: "cm-file__meta cm-recent__lost", text: `Diğer adları: ${rec.aliases.join(", ")}` }) : null,
+        row.reachable ? null : h("span", { class: "cm-file__meta cm-recent__lost", text: "Tarayıcı bu dosyaya erişimi bıraktı. Yeniden seçince vurgular geri gelir." }),
+      );
+      const main = row.reachable
+        ? h("button", { class: "cm-file__open", "aria-label": `${rec.name} dosyasını aç`, onclick: () => this.actions.openRecent(row) }, cover, body)
+        : h("span", { class: "cm-file__open is-static" }, cover, body);
+      const li = h("li", { class: `cm-file${rec.pinned ? " is-pinned" : ""}` },
+        main,
+        h("span", { class: "cm-file__time cm-muted", text: relative(rec.lastOpened) }),
+        row.reachable
+          ? h("span", { class: "cm-file__hint", "aria-hidden": "true", text: rec.lock ? "Kilidi aç" : "Aç" })
+          : h("button", { class: "cm-btn cm-btn--sm", onclick: () => this.actions.openRecent(row) }, "Dosyayı yeniden seç"),
+        this.more(rec),
+      );
+      this.draggable(li, rec);
+      ul.append(li);
     }
-    return h("div", { class: "cm-table-wrap" },
-      h("table", { class: "cm-table" },
-        h("thead", {}, h("tr", {},
-          h("th", { text: "Dosya" }), h("th", { style: "white-space:nowrap", text: "Kaldığın yer" }), h("th", { text: "Vurgular" }),
-          h("th", { style: "white-space:nowrap", text: "Son açılış" }), h("th", {}),
-        )),
-        body,
-      ),
-    );
+    return ul;
   }
 
   /** Kapak görünümü: ilk sayfa önizlemesi (kilitliyse renk), ad, kaldığın yer. */

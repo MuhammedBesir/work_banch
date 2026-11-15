@@ -23,7 +23,7 @@ test.describe("Oku modu", () => {
     await page.keyboard.press("1");
     await expect(page.locator(".cm-hlrect").first()).toBeVisible();
     await page.reload();
-    await expect(page.locator(".cm-drop")).toBeVisible();
+    await expect(page.locator(".cm-drop, .cm-lib__head").first()).toBeVisible();
     await openSample(page);
     await expect(page.locator(".cm-panel .cm-item")).toHaveCount(1);
   });

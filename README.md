@@ -42,6 +42,7 @@ Tek tarayıcı için `npx playwright test --project=chromium` (projeler: `chromi
 
 ## Son eklenenler
 
+- **Kitaplık ekranı** — büyük bırakma kartı yerine başlık (Kitaplık · N ders · N PDF · N vurgu) ve eylem satırı (PDF aç, Yeni ders, Not defteri, Paket aç); bırakma bütün sayfada çalışır. Ders kartları renkli ve son çalışılan PDF'lerin kapaklarıyla; dosyalar tablo yerine kapaklı satırlarda, ikinci satırda ders · kaldığın yer · vurgu ve ince okuma ilerleme çubuğu. Yedek uyarısı tek satır.
 - **Dersler (klasörler)** — ana ekranda "Derslerim": her ders bir kart (PDF ve vurgu sayısı). Dersin içindeyken seçilen ya da bırakılan PDF o derse eklenir; kitaplıktaki bir dosya ders kartına sürüklenerek taşınır. Boş dersler de saklanır ve yedeğe girer; ders silinince PDF'ler kitaplıkta kalır.
 - **Kitaplık düğmesi ve otomatik kayıt** — üst çubuğun solundaki ‹ Kitaplık PDF'i kapatıp ana sayfaya döner. Çıkmadan önce her şey kaydedilir: yazılmakta olan metin kutusu ve not, kaldığın sayfa, Düzenle modundaki sayfa değişiklikleri (soru sormadan yeni kopya). Metin kutusu yazılırken ~0,5 sn'lik her duraklamada kaydedilir. Üst çubukta durum: Kaydedildi · Kaydediliyor… · Kaydedilemedi; Düzenle modunda "N değişiklik · çıkışta kopya alınır".
 - **Metin kutusu** — imleç tam tıklanan noktada başlar (yakınlaştırma hesaba katılır); yazarken biçim çubuğundaki ✥ ile taşınır, sağ kenardaki tutamaçla genişletilir; dört yazı boyutu (küçük, orta, büyük, başlık); boş yere tıklamak yalnızca yazmayı bitirir.
