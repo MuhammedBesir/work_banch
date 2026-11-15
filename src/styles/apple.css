@@ -357,3 +357,34 @@ body { letter-spacing: -0.01em; text-rendering: optimizeLegibility; }
 .cm-saved.is-saving .cm-icon { opacity: .35; }
 .cm-saved.is-error { color: var(--danger); }
 .cm-saved.is-error .cm-icon { color: var(--danger); }
+
+/* ==========================================================================
+   3. tur: araç çubuğu, kayıt göstergesi, seçim kutusu, quiz kartı, mobil sekme çubuğu
+   ========================================================================== */
+/* Araç çubuğu açma-kapama düğmeleri: dolu mavi kutu yerine mavi simge (macOS kenar çubuğu düğmesi gibi). */
+.cm-bar .cm-btn.is-on { background: transparent; color: var(--accent); }
+.cm-bar .cm-btn.is-on:hover { background: var(--fill); }
+.cm-bar .cm-btn--count.is-on .cm-num { color: var(--accent); }
+/* Kayıt göstergesi: sağ grupta, sakin; yalnız kayıt uzun sürerse ya da sorun varsa dikkat çeker. */
+.cm-saved { font-size: 12px; color: var(--ink-muted); transition: opacity .2s var(--ease); }
+.cm-saved.is-idle { opacity: .75; }
+.cm-saved.is-saving .cm-icon { opacity: .35; }
+.cm-saved.is-dirty { color: var(--warning); }
+.cm-saved.is-dirty .cm-icon { color: var(--warning); }
+.cm-saved.is-error { opacity: 1; }
+/* Seçim kutusu (Sırala vb.): hap biçimli, kendi okuyla. */
+.cm-select { appearance: none; -webkit-appearance: none; border: 0; border-radius: 980px; background: var(--fill); color: var(--ink); padding: 0 24px 0 10px; min-height: 26px; font-weight: 500;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%236e6e73' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat; background-position: right 9px center; }
+.cm-select:hover { background-color: var(--fill-strong); }
+.cm-select:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 40%, transparent); }
+/* Quiz çağrı kartı: kesikli çerçeve yerine düz kart. */
+.cm-quizzes__head { border: 0 !important; border-radius: var(--radius-lg); box-shadow: var(--shadow-sheet); }
+/* Mobil sekme çubuğu: iOS gibi simge + küçük etiket, seçili olan mavi. */
+@media (max-width: 720px) {
+  .cm-mnav { padding: 4px 0 max(4px, env(safe-area-inset-bottom)); }
+  .cm-mnav .cm-btn { flex-direction: column; gap: 2px; min-height: 50px; padding: 4px 0; font-size: 10.5px; font-weight: 500; letter-spacing: 0; color: var(--ink-muted); border-radius: 10px; }
+  .cm-mnav .cm-btn .cm-icon { width: 24px; height: 24px; }
+  .cm-mnav .cm-btn.is-on { color: var(--accent); background: transparent; }
+  .cm-mnav .cm-btn:hover { background: transparent; }
+}

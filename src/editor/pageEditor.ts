@@ -15,6 +15,8 @@ export interface EditorActions {
   /** Kaydedilen yeni kopya: çıktı ve sayfa haritası (hangi yeni sayfa hangi asıl sayfadan, kaç derece döndürülmüş). */
   saved(out: Uint8Array, name: string, pages: EditPage[], sourceHashes: Map<string, string>): void | Promise<void>;
   askPassword(name: string, wrong: boolean): Promise<string | null>;
+  /** Kaydedilmemiş değişiklik sayısı değişince (üst çubuktaki kayıt göstergesi için). */
+  changed?(count: number): void;
 }
 
 const THUMB_W = 148;
@@ -178,6 +180,7 @@ export class PageEditor {
     const n = this.selected.size;
     this.selInfo.textContent = n ? `${num(n)} sayfa seçili` : `${num(this.pages.length)} sayfa`;
     this.changesEl.textContent = this.history.length ? `${num(this.history.length)} değişiklik ·` : "Değişiklik yok";
+    this.actions.changed?.(this.history.length);
     this.undoBtn.disabled = !this.history.length;
   }
 

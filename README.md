@@ -40,6 +40,15 @@ Tek tarayıcı için `npx playwright test --project=chromium` (projeler: `chromi
 
 `npm run build` çıktısı (`dist/`) herhangi bir statik sunucudan yayınlanabilir; sunucu tarafı yoktur. Üretim derlemesine sıkı bir CSP eklenir (üçüncü taraf script yok; dış bağlantılar yalnızca seçilen AI sağlayıcısına ve cihazda model indirmeye), yazı tipleri ve OCR verisi pakete gömülüdür. Uygulama yüklenebilir (PWA) ve çevrimdışı açılır.
 
+## Son eklenenler
+
+- **Dersler (klasörler)** — ana ekranda "Derslerim": her ders bir kart (PDF ve vurgu sayısı). Dersin içindeyken seçilen ya da bırakılan PDF o derse eklenir; kitaplıktaki bir dosya ders kartına sürüklenerek taşınır. Boş dersler de saklanır ve yedeğe girer; ders silinince PDF'ler kitaplıkta kalır.
+- **Kitaplık düğmesi ve otomatik kayıt** — üst çubuğun solundaki ‹ Kitaplık PDF'i kapatıp ana sayfaya döner. Çıkmadan önce her şey kaydedilir: yazılmakta olan metin kutusu ve not, kaldığın sayfa, Düzenle modundaki sayfa değişiklikleri (soru sormadan yeni kopya). Metin kutusu yazılırken ~0,5 sn'lik her duraklamada kaydedilir. Üst çubukta durum: Kaydedildi · Kaydediliyor… · Kaydedilemedi; Düzenle modunda "N değişiklik · çıkışta kopya alınır".
+- **Metin kutusu** — imleç tam tıklanan noktada başlar (yakınlaştırma hesaba katılır); yazarken biçim çubuğundaki ✥ ile taşınır, sağ kenardaki tutamaçla genişletilir; dört yazı boyutu (küçük, orta, büyük, başlık); boş yere tıklamak yalnızca yazmayı bitirir.
+- **Otomatik metin tanıma** — görüntülenen sayfa ve komşuları arka planda çözümlenir: metinsiz (taranmış), bozuk yazı tipli ya da resim içinde yazı bulunan sayfalar kendiliğinden tanınır; resimdeki yazı PDF metnine eklenir. Dosya menüsünden kapatılabilir. Boş not defteri sayfaları atlanır.
+- **Ücretsiz AI sağlayıcıları** — Gemini'ye ek olarak **Groq** (günlük sınırı yüksek, çok hızlı) ve **OpenRouter** (ücretsiz modeller). "Anahtarı dene ve modelleri yükle" hesabın modellerini listeler. Sınır dolunca (429) sağlayıcı adı ve bekleme süresiyle mesaj; Gemini'de sınır dolunca ya da model bulunamayınca diğer Flash / Flash-Lite modelleri denenir. AI paneli İşaretler'den bağımsız kapanır (×, Ctrl J).
+- **Apple tarzı sade tasarım** — nötr gri palet, sistem yazı tipi (SF), saç teli çizgiler, buzlu cam menüler ve paletler, iOS tarzı bölümlü denetimler, dolu filtre çipleri, yumuşak gölgeli kartlar; açık ve koyu temada AA kontrastı. Safari/iPad'de son açılanlardan yeniden açma (OPFS'e yazılamazsa kopya IndexedDB'de) düzeltildi.
+
 ## Oku modu ve v1 kapsamı
 
 [`docs/ozellikler.md`](docs/ozellikler.md) ve [`docs/riskler.md`](docs/riskler.md)'deki "ilk sürümde kalmalı" listesi:
@@ -63,7 +72,7 @@ Tek tarayıcı için `npx playwright test --project=chromium` (projeler: `chromi
 - **Sınır durumları** — PDF olmayan dosya, bozuk dosya (ayrıntı katlanmış), parola korumalı dosya (parola yalnızca bellekte), çok büyük dosya (300 MB / 1.500 sayfa üstü açmadan önce sorulur), taranmış PDF (okumayı engellemeyen, gizlenebilir uyarı bandı; "Metni tanıt (OCR)" ve "Sayfaya not ekle").
 - **Son açılanlar** — kaldığın sayfa, vurgu sayısı, son açılış. Chromium'da dosya tutamacı saklanır; Firefox ve Safari'de dosyanın bir kopyası tarayıcının özel deposunda (OPFS, en fazla 200 MB) tutulur ve tek tıkla açılır. Aynı içerik farklı adla açılınca tanınır ("aynı dosya, önceki adı …").
 - **Düzenle modunda** ayrıca kırpma ve not alanı (kenar boşluğu); birleştirilen PDF'in vurguları ve içindekiler ağacı yeni dosyaya taşınır.
-- **Duyarlı düzen** — 1100 px altında panel ve şerit çekmeceye döner, hedefler 44 px olur; 720 px altında alta sabit gezinme (Sayfalar · Vurgular · Ara · Diğer) ve alta sabit seçim çubuğu.
+- **Duyarlı düzen** — 1100 px altında panel ve şerit çekmeceye döner, hedefler 44 px olur; 720 px altında simgeli alt sekme çubuğu (Sayfalar · İşaretler · Ara · Diğer) ve alta sabit seçim çubuğu.
 - **Erişilebilirlik** — her yerde görünür odak halkası, tam klavye, `aria-live` duyuruları ("Önemli olarak vurgulandı, sayfa 112"), `prefers-reduced-motion`'da parlama yerine 1,5 sn sabit çerçeve. Kısayol listesi: `?`. axe-core ile WCAG 2.1 AA otomatik denetimi e2e testlerinin parçası (giriş, okuyucu, koyu tema, diyaloglar, Yaz ve Tekrar modu, telefon genişliği).
 - **Yedek hatırlatma** — 7 günde bir, vurgu varsa ve yedek alınmadıysa kısa bir bant (3 gün ertelenebilir).
 - **Hata günlüğü** — isteğe bağlı (Ayarlar), yalnızca bu cihazda; dosya adı ve içerik içermez, JSON olarak indirilebilir.

@@ -1014,8 +1014,7 @@ async function openReader(file: OpenDoc): Promise<void> {
     h("div", { class: "cm-bar__group" },
       // PDF'ten çık: kitaplığa (ana ekran) dön. Değişiklikler zaten kayıtlı.
       h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--withicon cm-bar__home", title: "PDF'i kapat, kitaplığa dön", "aria-label": "Kitaplığa dön", onclick: () => void goHome() }, icon("back"), h("span", { class: "is-wide", text: "Kitaplık" })),
-      railBtn, fileBtn,
-      h("span", { class: "cm-saved is-wide", role: "status", title: "Vurgu, not, yazı ve çizimler her değişiklikte bu tarayıcıya kaydedilir" }, icon("check"), h("span", { text: "Kaydedildi" }))),
+      railBtn, fileBtn),
     modeSeg,
     h("span", { class: "cm-bar__sep is-reader" }),
     h("div", { class: "cm-bar__group is-reader", "aria-label": "Sayfa" },
@@ -1032,6 +1031,8 @@ async function openReader(file: OpenDoc): Promise<void> {
       zoomBtn,
     ),
     h("span", { class: "cm-bar__spacer" }),
+    // Kayıt göstergesi Düzenle modunda da görünür (orada "çıkışta kopya alınır" uyarısını taşır).
+    h("span", { class: "cm-saved is-desk", role: "status", title: "Vurgu, not, yazı ve çizimler her değişiklikte bu tarayıcıya kaydedilir" }, icon("check"), h("span", { text: "Kaydedildi" })),
     h("div", { class: "cm-bar__group is-reader is-desk" },
       iconBtn("search", "Ara (Ctrl F)", { onclick: () => search.open(window.getSelection()?.toString().trim() || undefined) }),
       themeBtn,
@@ -1189,12 +1190,12 @@ async function openReader(file: OpenDoc): Promise<void> {
 
   const body = h("div", { class: "cm-body" }, rail.el, stageWrap, right);
   // Mobil: yüzen çubuk ve kalabalık üst bar yerine alta sabit gezinme.
-  const moreBtn = h("button", { class: "cm-btn cm-btn--ghost", "aria-haspopup": "menu" }, "Diğer");
+  const moreBtn = h("button", { class: "cm-btn cm-btn--ghost", "aria-haspopup": "menu" }, icon("more"), h("span", { text: "Diğer" }));
   moreBtn.addEventListener("click", () => fileMenu(moreBtn, true));
   const mnav = h("nav", { class: "cm-mnav", "aria-label": "Gezinme" },
-    h("button", { class: "cm-btn cm-btn--ghost", onclick: () => toggleRail() }, "Sayfalar"),
-    h("button", { class: "cm-btn cm-btn--ghost", onclick: () => togglePanel() }, "Vurgular"),
-    h("button", { class: "cm-btn cm-btn--ghost", onclick: () => search.open() }, "Ara"),
+    h("button", { class: "cm-btn cm-btn--ghost", "data-nav": "rail", onclick: () => toggleRail() }, icon("pages"), h("span", { text: "Sayfalar" })),
+    h("button", { class: "cm-btn cm-btn--ghost", "data-nav": "panel", onclick: () => togglePanel() }, icon("panel"), h("span", { text: "İşaretler" })),
+    h("button", { class: "cm-btn cm-btn--ghost", onclick: () => search.open() }, icon("search"), h("span", { text: "Ara" })),
     moreBtn,
   );
   const root = h("div", { class: "cm-app" }, bar, band, body, mnav);
@@ -1806,6 +1807,8 @@ function updateLayout(): void {
   railBtn.setAttribute("aria-pressed", String(railOpen));
   panelBtn.classList.toggle("is-on", panelOpen);
   panelBtn.setAttribute("aria-pressed", String(panelOpen));
+  root.querySelector('.cm-mnav [data-nav="rail"]')?.classList.toggle("is-on", railOpen);
+  root.querySelector('.cm-mnav [data-nav="panel"]')?.classList.toggle("is-on", panelOpen);
 }
 
 function toggleRail(on = !railOpen): void {
@@ -1878,6 +1881,7 @@ async function setMode(mode: Mode): Promise<void> {
     r.editor.destroy();
     r.editor.el.remove();
     r.editor = null;
+    queueMicrotask(renderSaved);
     r.body.hidden = false;
     r.root.classList.remove("is-edit");
     r.viewer.scheduleRender(0);
@@ -1897,7 +1901,7 @@ async function setMode(mode: Mode): Promise<void> {
     r.search.el.hidden = true;
     const editor = new PageEditor(
       { id: "main", name: r.file.rec.name, bytes: r.file.bytes, doc: r.file.doc },
-      { saved: (out, name, pages, hashes) => onEditorSaved(out, name, pages, hashes), askPassword: (n, w) => askPassword(n, w) },
+      { saved: (out, name, pages, hashes) => onEditorSaved(out, name, pages, hashes), changed: () => renderSaved(), askPassword: (n, w) => askPassword(n, w) },
       r.outline,
     );
     r.editor = editor;
@@ -1984,28 +1988,45 @@ async function onEditorSaved(out: Uint8Array, name: string, pages: EditPage[], s
 
 // Otomatik kayıt göstergesi: her yazma işleminde "Kaydediliyor…", bitince "Kaydedildi".
 let savedTimer = 0;
-db.saveState.addEventListener("change", () => {
+let savingTimer = 0;
+/** Göstergeyi mevcut duruma göre çiz; Düzenle modunda kaydedilmemiş sayfa değişikliği öncelikli. */
+function renderSaved(): void {
   const el = document.querySelector<HTMLElement>(".cm-saved");
   if (!el) return;
   const { pending, error } = db.saveStatus();
   const label = el.lastElementChild as HTMLElement;
+  const edits = reader?.editor?.changes ?? 0;
   clearTimeout(savedTimer);
+  clearTimeout(savingTimer);
+  el.classList.remove("is-saving", "is-error", "is-dirty", "is-idle");
   if (error) {
     el.classList.add("is-error");
     label.textContent = "Kaydedilemedi";
+    el.title = `Kayıt hatası: ${error instanceof Error ? error.message : String(error)}`;
     return;
   }
+  if (edits) {
+    // Sayfa düzenlemeleri veritabanına değil kopyaya yazılır: çıkışta kendiliğinden.
+    el.classList.add("is-dirty");
+    label.textContent = `${num(edits)} değişiklik · çıkışta kopya alınır`;
+    el.title = "Düzenle modundaki sayfa değişiklikleri çıkarken yeni bir kopyaya kaydedilir";
+    return;
+  }
+  el.title = "Vurgu, not, yazı ve çizimler her değişiklikte bu tarayıcıya kaydedilir";
   if (pending) {
-    el.classList.add("is-saving");
-    label.textContent = "Kaydediliyor…";
+    // Kısa yazmalar (açılış, küçük resim) göz kırpmasın: 400 ms'den uzun sürerse göster.
+    savingTimer = window.setTimeout(() => {
+      el.classList.add("is-saving");
+      label.textContent = "Kaydediliyor…";
+    }, 400);
     return;
   }
-  // Çok kısa yazmalarda göz kırpmasın: kısa bir an sonra "Kaydedildi".
   savedTimer = window.setTimeout(() => {
-    el.classList.remove("is-saving");
+    el.classList.add("is-idle");
     label.textContent = "Kaydedildi";
   }, 350);
-});
+}
+db.saveState.addEventListener("change", renderSaved);
 
 /**
  * PDF'ten çık: önce her şey kaydedilir (yazılan metin kutusu ve not, Düzenle modundaki sayfa
