@@ -1,4 +1,5 @@
 import type { Mark, Rect } from "../types";
+import { shapePoly } from "./geometry";
 
 /**
  * Kalem çizgilerini beyaz zemine siyah olarak çiz (el yazısı tanıma ve AI'ya gönderilecek görsel).
@@ -32,8 +33,14 @@ export function rasterInk(marks: Mark[], pageW: number, pageH: number, region: R
       if (m.shape === "rect") ctx.rect(a[0], a[1], b[0] - a[0], b[1] - a[1]);
       else if (m.shape === "ellipse") ctx.ellipse((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, Math.abs(b[0] - a[0]) / 2, Math.abs(b[1] - a[1]) / 2, 0, 0, Math.PI * 2);
       else {
-        ctx.moveTo(...a);
-        ctx.lineTo(...b);
+        const poly = shapePoly(m.shape, m.from, m.to)?.map(px);
+        if (poly) {
+          poly.forEach((p, i) => (i ? ctx.lineTo(...p) : ctx.moveTo(...p)));
+          ctx.closePath();
+        } else {
+          ctx.moveTo(...a);
+          ctx.lineTo(...b);
+        }
       }
     } else {
       const pts = m.points.map(px);

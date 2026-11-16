@@ -29,7 +29,7 @@ export const STICKY_TINTS: readonly StickyTint[] = ["yellow", "pink", "blue", "g
 
 /** Kalem rengi: üç hazır renk ya da özel renk (`#rrggbb`). */
 export type InkColor = PenColor | `#${string}`;
-export type ShapeKind = "rect" | "ellipse" | "arrow";
+export type ShapeKind = "rect" | "ellipse" | "arrow" | "line" | "triangle" | "diamond" | "pentagon" | "hexagon" | "star";
 /** Kalem türü: tükenmez (varsayılan), kurşun kalem, fosforlu kalem, dolma kalem (açılı uç). */
 export type PenKind = "pen" | "pencil" | "marker" | "fountain";
 export const PEN_KINDS: readonly PenKind[] = ["pen", "pencil", "marker", "fountain"];
@@ -188,7 +188,7 @@ export interface Settings {
   railOpen: boolean;
   panelOpen: boolean;
   ai: AiSettings;
-  pen: { color: InkColor; width: number; kind?: PenKind; custom?: string[]; textSize?: number };
+  pen: { color: InkColor; width: number; kind?: PenKind; custom?: string[]; textSize?: number; autoShape?: boolean };
   /** İsteğe bağlı yerel hata günlüğü (hiçbir yere gönderilmez). */
   errorLog: boolean;
   /** Son açılanlar görünümü. */

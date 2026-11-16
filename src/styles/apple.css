@@ -288,9 +288,9 @@ body { letter-spacing: -0.01em; text-rendering: optimizeLegibility; }
 /* ==========================================================================
    Yazma kolaylığı: okunur metin kutusu, yer tutucu, yazı boyutu düğmeleri
    ========================================================================== */
-/* Sayfa metninin üstüne yazılan yazı okunsun: hafif kâğıt rengi zemin. */
-.cm-page .cm-textbox:not(:empty) { background: color-mix(in srgb, var(--sheet) 86%, transparent); border-radius: calc(4px * var(--z, 1)); }
-.cm-page .cm-textbox[contenteditable] { background: var(--sheet); outline: 1.5px solid var(--accent) !important; outline-offset: 1px; box-shadow: 0 2px 10px rgba(0, 0, 0, .10); border-radius: calc(4px * var(--z, 1)); cursor: text; }
+/* Metin kutusunun zemini şeffaf: yazarken de sonra da alttaki sayfa görünür; yazarken yalnızca ince çerçeve. */
+.cm-page .cm-textbox { background: transparent; }
+.cm-page .cm-textbox[contenteditable] { background: transparent; outline: 1.5px solid var(--accent) !important; outline-offset: 1px; border-radius: calc(4px * var(--z, 1)); cursor: text; }
 .cm-page .cm-textbox[contenteditable]:empty::before { content: "Yazmaya başla…"; color: #8e8e93; pointer-events: none; }
 .cm-page .cm-sticky__text[contenteditable]:empty::before { content: "Not yaz…"; color: rgba(0, 0, 0, .45); pointer-events: none; }
 /* Yazı boyutu: dört "A", büyüyen boyutta. */
@@ -367,7 +367,7 @@ body { letter-spacing: -0.01em; text-rendering: optimizeLegibility; }
 .cm-bar .cm-btn--count.is-on .cm-num { color: var(--accent); }
 /* Kayıt göstergesi: sağ grupta, sakin; yalnız kayıt uzun sürerse ya da sorun varsa dikkat çeker. */
 .cm-saved { font-size: 12px; color: var(--ink-muted); transition: opacity .2s var(--ease); }
-.cm-saved.is-idle { opacity: .75; }
+.cm-saved.is-idle { opacity: 1; } /* soluklaştırma kontrastı AA altına düşürüyordu */
 .cm-saved.is-saving .cm-icon { opacity: .35; }
 .cm-saved.is-dirty { color: var(--warning); }
 .cm-saved.is-dirty .cm-icon { color: var(--warning); }
@@ -486,4 +486,29 @@ body { letter-spacing: -0.01em; text-rendering: optimizeLegibility; }
   .cm-foldergrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .cm-foldercard { min-height: 108px; padding: 12px; }
   .cm-home .cm-notice--warn > div > div { margin-left: 0; }
+}
+
+
+/* ==========================================================================
+   Şekiller ve boyutlandırma: yeni şekil ızgarası, otomatik şekil düğmesi,
+   yuvarlak köşe + kenar tutamaçları, tıklamayı geçiren seçim kutusu
+   ========================================================================== */
+.cm-palette .cm-tool--wide { grid-column: 1 / -1; width: auto; }
+.cm-palette .cm-tool--wide.is-on { background: var(--accent-soft) !important; color: var(--accent) !important; box-shadow: none; }
+.cm-palette .cm-tool--wide:not(.is-on) { opacity: .7; }
+/* Tutamaçlar: daha büyük, yuvarlak; kenar tutamaçları hap biçimli. */
+.cm-selbox__h { width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 1.5px solid var(--accent); box-shadow: 0 1px 3px rgba(0, 0, 0, .25); touch-action: none; z-index: 1; }
+.cm-selbox__h::before { content: ""; position: absolute; inset: -9px; } /* geniş dokunma alanı */
+.cm-selbox__h--nw { left: -8px; top: -8px; } .cm-selbox__h--se { right: -8px; bottom: -8px; }
+.cm-selbox__h--ne { right: -8px; top: -8px; } .cm-selbox__h--sw { left: -8px; bottom: -8px; }
+.cm-selbox__h--n, .cm-selbox__h--s { left: 50%; width: 22px; height: 8px; margin-left: -11px; border-radius: 4px; cursor: ns-resize; }
+.cm-selbox__h--n { top: -5px; } .cm-selbox__h--s { bottom: -5px; }
+.cm-selbox__h--e, .cm-selbox__h--w { top: 50%; width: 8px; height: 22px; margin-top: -11px; border-radius: 4px; cursor: ew-resize; }
+.cm-selbox__h--e { right: -5px; } .cm-selbox__h--w { left: -5px; }
+/* Şekil aracında kutunun içi tıklamayı geçirir: üstüne yeni şekil çizilebilir; tutamaçlar ve çubuk çalışır. */
+.cm-selbox--passive { pointer-events: none; cursor: crosshair; }
+.cm-selbox--passive .cm-selbox__h, .cm-selbox--passive .cm-selbox__bar { pointer-events: auto; }
+.cm-formatbar__size { font-size: 12px; min-width: 32px; }
+@media (max-width: 720px) {
+  .cm-stagewrap > .cm-palette .cm-tool--wide { grid-column: auto; width: 40px; }
 }

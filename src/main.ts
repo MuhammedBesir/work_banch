@@ -1295,7 +1295,8 @@ async function openReader(file: OpenDoc): Promise<void> {
     reader.outline = o;
     rail.setOutline(o);
   }).catch(() => {});
-  if (!file.rec.scannedDismissed) {
+  // Not defteri boş sayfalardan oluşur: "taranmış belge" uyarısı gösterilmez.
+  if (!file.rec.scannedDismissed && !file.rec.notebook) {
     void looksScanned(file.doc).then((scanned) => scanned && reader?.file === file && showScannedBand());
   }
 }

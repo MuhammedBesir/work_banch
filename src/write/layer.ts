@@ -1,7 +1,7 @@
 import type { InkColor, Mark } from "../types";
 import { h } from "../util";
 import { isCustom } from "./colors";
-import { arrowHead, inkPressures, penStyle, smoothPath, straightPath, strokeOutline } from "./geometry";
+import { arrowHead, inkPressures, penStyle, polyPath, shapePoly, smoothPath, straightPath, strokeOutline } from "./geometry";
 import { renderRich } from "./rich";
 
 const SVG = "http://www.w3.org/2000/svg";
@@ -79,9 +79,12 @@ export function drawingsSvg(marks: Mark[], w: number, h: number, selected: Reado
         g.append(svg("rect", { x: Math.min(x0, x1), y: Math.min(y0, y1), width: Math.abs(x1 - x0), height: Math.abs(y1 - y0) }));
       } else if (m.shape === "ellipse") {
         g.append(svg("ellipse", { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, rx: Math.abs(x1 - x0) / 2, ry: Math.abs(y1 - y0) / 2 }));
-      } else {
+      } else if (m.shape === "arrow") {
         const [a, b] = arrowHead(m.from, m.to, aspect);
         g.append(svg("path", { d: `M${x0} ${y0} L${x1} ${y1} M${a[0]} ${a[1]} L${x1} ${y1} L${b[0]} ${b[1]}` }));
+      } else {
+        const poly = shapePoly(m.shape, m.from, m.to);
+        g.append(svg("path", { d: poly ? polyPath(poly) : `M${x0} ${y0} L${x1} ${y1}`, class: poly ? "cm-stroke--joined" : "" }));
       }
       root.append(g);
     }

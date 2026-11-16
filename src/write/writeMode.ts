@@ -4,8 +4,8 @@ import { PEN_COLORS, PEN_KINDS, STICKY_TINTS } from "../types";
 import { h, isTyping, uid } from "../util";
 import { SWATCHES, inkCss, isCustom } from "./colors";
 import {
-  constrain, eraseInk, hitMark, inLasso, inkSlope, moveMark, penStyle, recognizeShape, rotateAround, scaleMark,
-  simplifyIndices, straightPath, unionBox, type Recognized,
+  constrain, eraseInk, hitMark, inLasso, inkSlope, moveMark, penStyle, polyPath, recognizeShape, recognizedSize, rotateAround, scaleMark,
+  shapePoly, simplify, simplifyIndices, straightPath, tidyShape, unionBox, type Recognized,
 } from "./geometry";
 import { PEN_KIND_LABEL, PEN_LABEL, colorClass, colorLabel } from "./layer";
 import { applyFormat } from "./rich";
@@ -27,7 +27,15 @@ const TOOLS: [Tool, string, string][] = [
   ["image", "Resim", "I"],
   ["eraser", "Silgi", "E"],
 ];
-const SHAPES: [ShapeKind, string][] = [["rect", "Dikdörtgen"], ["ellipse", "Daire"], ["arrow", "Ok"]];
+const SHAPES: [ShapeKind, string][] = [
+  ["line", "Çizgi"], ["arrow", "Ok"], ["rect", "Dikdörtgen"], ["ellipse", "Daire"], ["triangle", "Üçgen"],
+  ["diamond", "Eşkenar dörtgen"], ["pentagon", "Beşgen"], ["hexagon", "Altıgen"], ["star", "Yıldız"],
+];
+/** Otomatik şekil düzeltme yalnızca bu boyuttan (ekran pikseli) büyük çizimlerde çalışır: el yazısı harfleri bozulmasın. */
+const AUTO_MIN_LINE = 56;
+const AUTO_MIN_SHAPE = 46;
+/** Seçim çubuğundaki küçült / büyüt adımı. */
+const SCALE_STEP = 1.15;
 const WIDTHS = [1, 2, 4];
 type EraserMode = "partial" | "stroke";
 /** Kalem bu kadar süre yerinde durursa çizilen şekil düzeltilir (çiz ve bekle). */
@@ -46,7 +54,7 @@ export interface WriteActions {
   remove(id: string): void;
   /** Sayfanın işaret katmanını yeniden çiz (seçim/araç değişince). */
   redraw(page: number): void;
-  pen(p: { color: InkColor; width: number; kind: PenKind; custom: string[]; textSize: number }): void;
+  pen(p: { color: InkColor; width: number; kind: PenKind; custom: string[]; textSize: number; autoShape: boolean }): void;
   announce(text: string): void;
   /** Seçili el yazısını metne çevir ya da matematiği çöz (kement eylem çubuğu). */
   handwriting?(marks: Mark[], page: number, mode: "text" | "math"): void;
@@ -68,6 +76,8 @@ export class WriteMode {
   eraserMode: EraserMode = "partial";
   /** Yeni metin kutularının yazı boyutu (px, %100 yakınlaştırmada). */
   textSize: number;
+  /** Kalemle çizilen çizgi, üçgen, dörtgen, daire kalem kalkınca kendiliğinden düzeltilir. */
+  autoShape: boolean;
   private custom: string[];
   private colorsOpen = false;
   /** Seçili işaretler (`Shift` + tıklama ile çoklu seçim). */
@@ -82,10 +92,11 @@ export class WriteMode {
   constructor(
     private viewer: Viewer,
     private fileHash: string,
-    pen: { color: InkColor; width: number; kind?: PenKind; custom?: string[]; textSize?: number },
+    pen: { color: InkColor; width: number; kind?: PenKind; custom?: string[]; textSize?: number; autoShape?: boolean },
     private actions: WriteActions,
   ) {
     this.textSize = pen.textSize ?? 16;
+    this.autoShape = pen.autoShape ?? true;
     this.color = pen.color;
     this.width = pen.width;
     this.pen = pen.kind ?? "pen";
@@ -171,7 +182,7 @@ export class WriteMode {
   }
 
   private savePen(): void {
-    this.actions.pen({ color: this.color, width: this.width, kind: this.pen, custom: this.custom, textSize: this.textSize });
+    this.actions.pen({ color: this.color, width: this.width, kind: this.pen, custom: this.custom, textSize: this.textSize, autoShape: this.autoShape });
   }
 
   setColor(c: InkColor): void {
@@ -222,7 +233,13 @@ export class WriteMode {
     const subs = this.tool === "shape"
       ? [sep(), group("Şekil", ...SHAPES.map(([s, label]) => btn(`shape-${s}`, label, this.shape === s, () => ((this.shape = s), this.renderPalette()), "cm-tool cm-tool--sub")))]
       : this.tool === "pen"
-        ? [sep(), group("Kalem türü", ...PEN_KINDS.map((k) => btn(`pen-${k}`, PEN_KIND_LABEL[k], this.pen === k, () => this.setPen(k), "cm-tool cm-tool--sub")))]
+        ? [sep(), group("Kalem türü", ...PEN_KINDS.map((k) => btn(`pen-${k}`, PEN_KIND_LABEL[k], this.pen === k, () => this.setPen(k), "cm-tool cm-tool--sub")),
+            btn("autoshape", `Otomatik şekil düzeltme: ${this.autoShape ? "açık" : "kapalı"} (çizgi, üçgen, dörtgen, daire kalem kalkınca düzelir; Ctrl Z ham çizime döner)`, this.autoShape, () => {
+              this.autoShape = !this.autoShape;
+              this.savePen();
+              this.renderPalette();
+              this.actions.announce(`Otomatik şekil düzeltme ${this.autoShape ? "açık" : "kapalı"}`);
+            }, "cm-tool cm-tool--sub cm-tool--wide"))]
         : this.tool === "eraser"
           ? [sep(), group("Silgi",
               btn("eraser-partial", "Kısmi silgi: yalnızca değdiği yer", this.eraserMode === "partial", () => ((this.eraserMode = "partial"), this.renderPalette()), "cm-tool cm-tool--sub"),
@@ -320,6 +337,9 @@ export class WriteMode {
       this.record(list.map((m) => ({ remove: m })));
       return true;
     }
+    // Seçim varken + / − : büyüt / küçült.
+    if (this.selected.size && (e.key === "+" || e.key === "=")) return this.scaleBy(SCALE_STEP), true;
+    if (this.selected.size && (e.key === "-" || e.key === "_")) return this.scaleBy(1 / SCALE_STEP), true;
     const t = TOOLS.find((x) => x[2].toLowerCase() === e.key.toLowerCase());
     if (t && !e.shiftKey) return this.setTool(t[0]), true;
     return false;
@@ -582,24 +602,40 @@ export class WriteMode {
       if (!pts.length || picked) return;
       const now = Date.now();
       const base = { id: uid(), fileHash: this.fileHash, page: at.page, createdAt: now, updatedAt: now };
-      let m: Mark;
-      const r = shaped as Recognized | null;
-      if (r && (r.type === "rect" || r.type === "ellipse")) {
-        m = { ...base, kind: "shape", shape: r.type, color: this.color, width: this.width, from: r.from, to: r.to };
-      } else if (r && (r.type === "line" || r.type === "poly")) {
-        m = { ...base, kind: "ink", color: this.color, width: this.width, points: r.pts, straight: true, ...(pen === "pen" ? {} : { pen }) };
-      } else {
-        // Kalemle (stylus) çizildiyse her noktanın basıncı saklanır: çizgi boyunca kalınlık değişir.
-        const keep = simplifyIndices(pts);
-        m = {
-          ...base, kind: "ink", color: this.color, width: this.width,
-          points: keep.map((i) => pts[i]),
-          ...(e.pointerType === "pen" && pen !== "marker" ? { pressures: keep.map((i) => pressures[i]) } : {}),
-          ...(pen === "pen" ? {} : { pen }),
-        };
+      // Kalemle (stylus) çizildiyse her noktanın basıncı saklanır: çizgi boyunca kalınlık değişir.
+      const keep = simplifyIndices(pts);
+      const raw: Mark = {
+        ...base, kind: "ink", color: this.color, width: this.width,
+        points: keep.map((i) => pts[i]),
+        ...(e.pointerType === "pen" && pen !== "marker" ? { pressures: keep.map((i) => pressures[i]) } : {}),
+        ...(pen === "pen" ? {} : { pen }),
+      };
+      let r = shaped as Recognized | null;
+      // Otomatik düzeltme: kalem kalkınca, yeterince büyük ve net şekillerde. Fosforluda yalnızca düz çizgi.
+      let auto = false;
+      if (!r && this.autoShape) {
+        const cand = recognizeShape(pts, at.w, at.h);
+        if (cand && (pen !== "marker" || cand.type === "line") && recognizedSize(cand, at.w, at.h) >= (cand.type === "line" ? AUTO_MIN_LINE : AUTO_MIN_SHAPE)) {
+          r = cand;
+          auto = true;
+        }
       }
+      if (!r) {
+        this.actions.add(raw);
+        this.record([{ add: raw }]);
+        return;
+      }
+      r = tidyShape(r, at.w, at.h);
+      const m: Mark = r.type === "line" || r.type === "poly"
+        ? { ...base, id: uid(), kind: "ink", color: this.color, width: this.width, points: r.pts, straight: true, ...(pen === "pen" ? {} : { pen }) }
+        : { ...base, id: uid(), kind: "shape", shape: r.type, color: this.color, width: this.width, from: r.from, to: r.to };
       this.actions.add(m);
-      this.record([{ add: m }]);
+      if (auto) {
+        // İki adım: ilk Ctrl Z düzeltmeyi geri alır (ham çizim kalır), ikincisi çizimi siler.
+        this.record([{ add: raw }]);
+        this.record([{ remove: raw }, { add: m }]);
+        this.actions.announce("Şekil düzeltildi; Ctrl Z ham çizime döner");
+      } else this.record([{ add: m }]);
     });
   }
 
@@ -625,18 +661,23 @@ export class WriteMode {
       to = ev.shiftKey ? constrain(from, [px, py], this.shape, at.w, at.h) : [px, py];
       const [x, y] = to;
       const [x0, y0] = from;
+      const poly = shapePoly(this.shape, from, to);
       path.setAttribute("d", this.shape === "rect"
         ? `M${x0} ${y0} H${x} V${y} H${x0} Z`
         : this.shape === "ellipse"
           ? ellipsePath(x0, y0, x, y)
-          : `M${x0} ${y0} L${x} ${y}`);
+          : poly ? polyPath(poly) : `M${x0} ${y0} L${x} ${y}`);
     }, () => {
       cancelPick();
       live.done();
-      if (picked || !from || Math.hypot((to[0] - from[0]) * at.w, (to[1] - from[1]) * at.h) < 6) return;
+      if (picked) return;
+      // Boş tıklama: seçimi bırak.
+      if (!from || Math.hypot((to[0] - from[0]) * at.w, (to[1] - from[1]) * at.h) < 6) return this.select(null);
       const m: Mark = { id: uid(), fileHash: this.fileHash, page: at.page, kind: "shape", shape: this.shape, color: this.color, width: this.width, from, to, createdAt: Date.now(), updatedAt: Date.now() };
       this.actions.add(m);
       this.record([{ add: m }]);
+      // Yeni şekil seçili kalır: köşe ve kenar tutamaçlarıyla hemen boyutlandırılabilir.
+      this.select(m.id);
     });
   }
 
@@ -659,13 +700,14 @@ export class WriteMode {
         ring.setAttribute("cy", String(y));
         for (const m of this.actions.marks()) {
           if (m.page !== at.page) continue;
-          if (partial && m.kind === "ink" && !m.straight) {
+          if (partial && m.kind === "ink") {
             const pieces = eraseInk(m, x, y, ERASER_PX, at.w, at.h);
             if (!pieces) continue;
             this.actions.remove(m.id);
             ops.push({ remove: m });
             for (const p of pieces) {
-              const piece: Mark = { ...m, id: uid(), points: p.points, pressures: p.pressures, updatedAt: Date.now() };
+              // Düzeltilmiş (düz kenarlı) çizimin parçaları da düz kalır; ara noktalar sadeleştirilir.
+              const piece: Mark = { ...m, id: uid(), points: m.straight ? simplify(p.points, 0.0002) : p.points, pressures: p.pressures, updatedAt: Date.now() };
               if (!p.pressures) delete (piece as { pressures?: number[] }).pressures;
               this.actions.add(piece);
               ops.push({ add: piece });
@@ -718,10 +760,13 @@ export class WriteMode {
   /** Seçimin çevresinde kutu, köşelerde boyut tutamaçları ve üstte eylem çubuğu. */
   paintSelection(): void {
     this.viewer.root.querySelectorAll(".cm-selbox").forEach((n) => n.remove());
-    if (!this.active || !(this.tool === "select" || this.tool === "lasso")) return;
+    if (!this.active) return;
     const sel = this.selectedOn();
     const pageEl = sel && this.viewer.pageElement(sel.page);
     if (!sel || !pageEl) return;
+    // Şekil aracında az önce çizilen şekil de kutulanır; kutunun içi tıklamayı geçirir (üstüne yeni şekil çizilebilir).
+    const passive = this.tool === "shape";
+    if (!(this.tool === "select" || this.tool === "lasso" || (passive && sel.marks.every((m) => m.kind === "shape")))) return;
     // Tek metin kutusu ya da notta kutu gereksiz (kendi tutamacı ve düzenleme var).
     // Düzenlenen kutuda seçim kutusu yok (biçim çubuğu var).
     if (this.editingId && sel.marks.some((m) => m.id === this.editingId)) return;
@@ -749,11 +794,16 @@ export class WriteMode {
         btn("totext", "Metne çevir", () => this.actions.handwriting!(ink, sel.page, "text")),
         btn("math", "Matematiği çöz", () => this.actions.handwriting!(ink, sel.page, "math")),
       ] : []),
+      btn("shrink", "Küçült (−)", () => this.scaleBy(1 / SCALE_STEP)),
+      btn("grow", "Büyüt (+)", () => this.scaleBy(SCALE_STEP)),
       btn("copy", "Çoğalt", () => this.duplicate()),
       btn("trash", "Sil (Del)", () => this.deleteSelected()),
     );
-    const box = h("div", { class: "cm-selbox", "aria-hidden": "false" },
-      ...["nw", "ne", "sw", "se"].map((c) => h("span", { class: `cm-selbox__h cm-selbox__h--${c}`, "data-scale": c, "aria-hidden": "true" })),
+    // Köşeler oranlı / serbest ölçekler; kenarlar tek yönde uzatır (tek metin kutusu ve notta kendi genişlik tutamacı var).
+    const single = sel.marks.length === 1 ? sel.marks[0].kind : null;
+    const handles = single === "text" || single === "sticky" ? ["nw", "ne", "sw", "se"] : ["nw", "ne", "sw", "se", "n", "s", "e", "w"];
+    const box = h("div", { class: `cm-selbox${passive ? " cm-selbox--passive" : ""}`, "aria-hidden": "false" },
+      ...handles.map((c) => h("span", { class: `cm-selbox__h cm-selbox__h--${c}`, "data-scale": c, "aria-hidden": "true" })),
       bar,
     );
     const pad = 0.004;
@@ -832,7 +882,9 @@ export class WriteMode {
     const [x, y, w, hh] = unionBox(sel.marks)!;
     const ox = corner.includes("w") ? x + w : x;
     const oy = corner.includes("n") ? y + hh : y;
-    const keepRatio = sel.marks.every((m) => m.kind === "image");
+    const edge = corner.length === 1;
+    // Resim ve yazı oranını korur (yazıda harf boyutu ölçekle birlikte değişir).
+    const keepRatio = !edge && sel.marks.every((m) => m.kind === "image" || m.kind === "text");
     let sx = 1;
     let sy = 1;
     const box = this.viewer.root.querySelector<HTMLElement>(".cm-selbox");
@@ -841,9 +893,9 @@ export class WriteMode {
     const r = pageEl.getBoundingClientRect();
     this.track(e, pageEl, (list, ev) => {
       const [px, py] = list[list.length - 1];
-      sx = Math.max(0.1, Math.abs(px - ox) / (w || 0.001));
-      sy = Math.max(0.1, Math.abs(py - oy) / (hh || 0.001));
-      if (keepRatio || ev.shiftKey) sx = sy = Math.max(sx, sy);
+      sx = corner === "n" || corner === "s" ? 1 : Math.max(0.1, Math.abs(px - ox) / (w || 0.001));
+      sy = corner === "e" || corner === "w" ? 1 : Math.max(0.1, Math.abs(py - oy) / (hh || 0.001));
+      if (!edge && (keepRatio || ev.shiftKey)) sx = sy = Math.max(sx, sy);
       for (const { n, m } of nodes) {
         const st = (n as HTMLElement).style;
         if (n instanceof SVGElement) {
@@ -863,6 +915,18 @@ export class WriteMode {
       ops.forEach((op) => "after" in op && this.actions.update(op.after));
       this.record(ops);
     });
+  }
+
+  /** Seçimi ortasından oranlı küçült / büyüt (seçim çubuğu ve + / − tuşları). */
+  private scaleBy(k: number): void {
+    const sel = this.selectedOn();
+    if (!sel) return;
+    const [x, y, w, hh] = unionBox(sel.marks)!;
+    const ops: Op[] = sel.marks.map((m) => ({ before: m, after: { ...scaleMark(m, x + w / 2, y + hh / 2, k, k), updatedAt: Date.now() } }));
+    ops.forEach((op) => "after" in op && this.actions.update(op.after));
+    this.record(ops);
+    this.paintSelection();
+    this.actions.announce(k > 1 ? "Büyütüldü" : "Küçültüldü");
   }
 
   // ---------- Resim ----------
@@ -1048,6 +1112,17 @@ export class WriteMode {
     const bar = h("div", { class: "cm-formatbar", role: "toolbar", "aria-label": "Biçim" },
       fmt("B", "bold", "Kalın (Ctrl B)"), fmt("I", "italic", "İtalik (Ctrl I)"), fmt("U", "underline", "Altı çizili (Ctrl U)"), fmt("S", "strike", "Üstü çizili"),
       fmt("•", "bullet", "Madde işareti"), fmt("1.", "number", "Sıralı liste"), fmt("☐", "check", "Yapılacak"), fmt("H", "heading", "Başlık"), fmt("▦", "table", "Tablo"));
+    // Yazı boyutu: A− / A+ (yalnızca metin kutusu).
+    if (m.kind === "text") {
+      const step = (dir: number) => {
+        const cur = parseFloat(host!.style.getPropertyValue("--fs")) || m.size || 14;
+        this.setTextSize(Math.max(8, Math.min(96, Math.round(dir > 0 ? cur * 1.15 + 0.5 : cur / 1.15))));
+        place();
+      };
+      const sz = (label: string, title: string, dir: number) =>
+        h("button", { class: "cm-formatbar__btn cm-formatbar__size", title, "aria-label": title, onpointerdown: (ev: Event) => ev.preventDefault(), onclick: () => step(dir) }, label);
+      bar.append(h("span", { class: "cm-formatbar__sep" }), sz("A−", "Yazıyı küçült", -1), sz("A+", "Yazıyı büyüt", 1));
+    }
     // Taşıma tutamacı (çubuğun solunda) ve genişlik tutamacı (kutunun sağ kenarında): yazarken de kullanılır,
     // imleç metinde kalır.
     const layerEl = host!.parentElement!;
@@ -1058,9 +1133,11 @@ export class WriteMode {
       host!.style.left = `${cur[0] * 100}%`;
       host!.style.top = `${cur[1] * 100}%`;
       host!.style.width = `${cur[2] * 100}%`;
-      // Çubuk kutunun dışında (metne karışmasın), sol üst köşesinin hemen üstünde.
-      bar.style.left = host!.style.left;
-      bar.style.top = host!.style.top;
+      // Çubuk kutunun dışında (metne karışmasın), sol üst köşesinin hemen üstünde; sayfanın sağından taşmaz.
+      const zoom = Number(getComputedStyle(bar).zoom) || 1;
+      const maxLeft = layerEl.clientWidth - bar.offsetWidth * zoom - 4;
+      bar.style.left = `${Math.max(4, Math.min(host!.offsetLeft, maxLeft)) / zoom}px`;
+      bar.style.top = `${host!.offsetTop / zoom}px`;
       sizer.style.left = `calc(${(cur[0] + cur[2]) * 100}% - 6px)`;
       sizer.style.top = `${host!.offsetTop + host!.offsetHeight / 2 - 12}px`;
     };

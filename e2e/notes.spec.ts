@@ -190,3 +190,59 @@ test("Safari durumu: createWritable yokken de son açılanlardan yeniden açıl�
   await page.getByRole("button", { name: /dosyasını aç$/ }).first().click();
   await expect(page.locator(".cm-textbox", { hasText: "Safari notu" })).toHaveCount(1, { timeout: 20_000 });
 });
+
+test("Şekiller: otomatik düzeltme, geri alınca ham çizim, yeni şekiller ve boyutlandırma", async ({ page }) => {
+  await newNotebook(page);
+  await page.keyboard.press("p");
+  const box = (await page.locator('.cm-page[data-page="0"]').boundingBox())!;
+  const marks = page.locator('.cm-page[data-page="0"] .cm-ink > *');
+  const stroke = async (pts: [number, number][]) => {
+    await page.mouse.move(box.x + pts[0][0], box.y + pts[0][1]);
+    await page.mouse.down();
+    for (const [x, y] of pts.slice(1)) await page.mouse.move(box.x + x, box.y + y, { steps: 3 });
+    await page.mouse.up();
+  };
+  // Elle çizilen (titrek) daire kendiliğinden düzgün daire olur.
+  await stroke(Array.from({ length: 33 }, (_, i) => [300 + Math.cos((i / 32) * 2 * Math.PI) * 70 + (i % 3), 150 + Math.sin((i / 32) * 2 * Math.PI) * 66 - (i % 2)] as [number, number]));
+  await expect(marks).toHaveCount(1);
+  await expect(page.locator('.cm-page[data-page="0"] .cm-ink ellipse')).toHaveCount(1);
+  // İlk geri al: düzeltme geri alınır, ham çizim kalır; ikincisi çizimi siler.
+  await page.keyboard.press("Control+z");
+  await expect(page.locator('.cm-page[data-page="0"] .cm-ink ellipse')).toHaveCount(0);
+  await expect(marks).toHaveCount(1);
+  await page.keyboard.press("Control+z");
+  await expect(marks).toHaveCount(0);
+  // Otomatik düzeltme kapatılınca çizim olduğu gibi kalır.
+  await page.getByRole("button", { name: /Otomatik şekil düzeltme: açık/ }).click();
+  await stroke(Array.from({ length: 33 }, (_, i) => [300 + Math.cos((i / 32) * 2 * Math.PI) * 70, 150 + Math.sin((i / 32) * 2 * Math.PI) * 66] as [number, number]));
+  await expect(page.locator('.cm-page[data-page="0"] .cm-ink ellipse')).toHaveCount(0);
+  await expect(marks).toHaveCount(1);
+  // Şekil aracı: yıldız çiz; seçili kalır, köşe tutamacı ve Büyüt düğmesi boyutu değiştirir.
+  await page.keyboard.press("r");
+  await page.getByRole("button", { name: "Yıldız", exact: true }).click();
+  await page.mouse.move(box.x + 80, box.y + 320);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 180, box.y + 420, { steps: 4 });
+  await page.mouse.up();
+  const star = page.locator('.cm-page[data-page="0"] .cm-ink > g').last();
+  await expect(page.locator(".cm-selbox__h")).toHaveCount(8);
+  const w0 = (await star.boundingBox())!.width;
+  const hd = (await page.locator(".cm-selbox__h--se").boundingBox())!;
+  await page.mouse.move(hd.x + hd.width / 2, hd.y + hd.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(hd.x + 60, hd.y + 60, { steps: 4 });
+  await page.mouse.up();
+  const w1 = (await star.boundingBox())!.width;
+  expect(w1).toBeGreaterThan(w0 + 30);
+  await page.getByRole("button", { name: "Büyüt (+)" }).click();
+  await expect.poll(async () => (await star.boundingBox())!.width).toBeGreaterThan(w1 + 5);
+  // Metin kutusu: zemin şeffaf, A+ yazıyı büyütür.
+  await page.keyboard.press("t");
+  await page.mouse.click(box.x + 320, box.y + 330);
+  await page.keyboard.type("Şeffaf");
+  const editing = page.locator(".cm-textbox[contenteditable]");
+  expect(await editing.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
+  await page.getByRole("button", { name: "Yazıyı büyüt" }).click();
+  await page.keyboard.press("Escape");
+  expect(parseFloat(await page.locator(".cm-textbox").evaluate((el) => (el as HTMLElement).style.getPropertyValue("--fs")))).toBeGreaterThan(16);
+});

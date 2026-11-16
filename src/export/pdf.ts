@@ -3,7 +3,7 @@ import {
 } from "pdf-lib";
 import type { Color, Highlight, Mark, Rect } from "../types";
 import { inkRgb } from "../write/colors";
-import { arrowHead, inkPressures, penStyle, smoothPath, straightPath, strokeOutline } from "../write/geometry";
+import { arrowHead, inkPressures, penStyle, polyPath, shapePoly, smoothPath, straightPath, strokeOutline } from "../write/geometry";
 import { richPlain } from "../write/rich";
 import { stickyLabel } from "../write/layer";
 
@@ -146,9 +146,12 @@ function drawFlat(g: PageGeom, m: Extract<Mark, { kind: "ink" | "shape" }>): voi
   const [x1, y1] = m.to;
   if (m.shape === "rect") draw(`M${x0} ${y0} L${x1} ${y0} L${x1} ${y1} L${x0} ${y1} Z`);
   else if (m.shape === "ellipse") draw(ellipseD(x0, y0, x1, y1, g.vw, g.vh));
-  else {
+  else if (m.shape === "arrow") {
     const [a, b] = arrowHead(m.from, m.to, g.vh / g.vw);
     draw(`M${x0} ${y0} L${x1} ${y1} M${a[0]} ${a[1]} L${x1} ${y1} L${b[0]} ${b[1]}`);
+  } else {
+    const poly = shapePoly(m.shape, m.from, m.to);
+    draw(poly ? polyPath(poly) : `M${x0} ${y0} L${x1} ${y1}`);
   }
 }
 
@@ -269,7 +272,8 @@ function addTextNote(doc: PDFDocument, g: PageGeom, at: Rect, text: string, colo
 }
 
 function addDrawingAnnot(doc: PDFDocument, g: PageGeom, m: Extract<Mark, { kind: "ink" | "shape" }>): void {
-  const pts = m.kind === "ink" ? m.points : [m.from, m.to];
+  const poly = m.kind === "shape" ? shapePoly(m.shape, m.from, m.to) : null;
+  const pts = m.kind === "ink" ? m.points : poly ?? [m.from, m.to];
   const pdf = pts.map(([x, y]) => viewToPdf(g, x, y));
   const pad = m.width + 2;
   const rect = [Math.min(...pdf.map((p) => p[0])) - pad, Math.min(...pdf.map((p) => p[1])) - pad, Math.max(...pdf.map((p) => p[0])) + pad, Math.max(...pdf.map((p) => p[1])) + pad];
@@ -278,6 +282,10 @@ function addDrawingAnnot(doc: PDFDocument, g: PageGeom, m: Extract<Mark, { kind:
     addAnnot(doc, g.page, { ...base, Subtype: "Ink", InkList: [pdf.flat()] });
   } else if (m.shape === "arrow") {
     addAnnot(doc, g.page, { ...base, Subtype: "Line", L: pdf.flat(), LE: [PDFName.of("None"), PDFName.of("OpenArrow")] });
+  } else if (m.shape === "line") {
+    addAnnot(doc, g.page, { ...base, Subtype: "Line", L: pdf.flat() });
+  } else if (poly) {
+    addAnnot(doc, g.page, { ...base, Subtype: "Polygon", Vertices: pdf.flat() });
   } else {
     const [x0, y0, x1, y1] = [Math.min(pdf[0][0], pdf[1][0]), Math.min(pdf[0][1], pdf[1][1]), Math.max(pdf[0][0], pdf[1][0]), Math.max(pdf[0][1], pdf[1][1])];
     addAnnot(doc, g.page, { ...base, Rect: [x0 - pad, y0 - pad, x1 + pad, y1 + pad], RD: [pad, pad, pad, pad], Subtype: m.shape === "rect" ? "Square" : "Circle" });

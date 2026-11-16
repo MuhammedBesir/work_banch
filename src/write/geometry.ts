@@ -1,5 +1,5 @@
 import { rotateRect } from "../geometry";
-import type { Mark, PenKind, Rect } from "../types";
+import type { Mark, PenKind, Rect, ShapeKind } from "../types";
 
 type Pt = [number, number];
 
@@ -74,10 +74,10 @@ export function strokeOutline(points: Pt[], pressures: number[], widthPx: number
 }
 
 /** Shift: şekil kare/daire olur, ok ve çizgi 45°'lik açılara oturur (piksel uzayında). */
-export function constrain(from: Pt, to: Pt, kind: "rect" | "ellipse" | "arrow", w: number, h: number): Pt {
+export function constrain(from: Pt, to: Pt, kind: ShapeKind, w: number, h: number): Pt {
   const dx = (to[0] - from[0]) * w;
   const dy = (to[1] - from[1]) * h;
-  if (kind === "arrow") {
+  if (kind === "arrow" || kind === "line") {
     const ang = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
     const len = Math.hypot(dx, dy);
     return [from[0] + (Math.cos(ang) * len) / w, from[1] + (Math.sin(ang) * len) / h];
@@ -85,6 +85,33 @@ export function constrain(from: Pt, to: Pt, kind: "rect" | "ellipse" | "arrow", 
   const side = Math.max(Math.abs(dx), Math.abs(dy));
   return [from[0] + (Math.sign(dx || 1) * side) / w, from[1] + (Math.sign(dy || 1) * side) / h];
 }
+
+/**
+ * Köşeli şekillerin köşeleri (0–1): üçgen, eşkenar dörtgen, beşgen, altıgen, yıldız. Diğer şekillerde `null`.
+ * Şekil `from`–`to` kutusuna oturur; yukarı doğru sürüklenirse baş aşağı çizilir.
+ */
+export function shapePoly(shape: ShapeKind, from: Pt, to: Pt): Pt[] | null {
+  const [x0, y0] = from;
+  const [x1, y1] = to;
+  const cx = (x0 + x1) / 2;
+  const cy = (y0 + y1) / 2;
+  if (shape === "triangle") return [[cx, y0], [x1, y1], [x0, y1]];
+  if (shape === "diamond") return [[cx, y0], [x1, cy], [cx, y1], [x0, cy]];
+  const n = shape === "pentagon" ? 5 : shape === "hexagon" ? 6 : shape === "star" ? 10 : 0;
+  if (!n) return null;
+  const rx = (x1 - x0) / 2;
+  const ry = (y1 - y0) / 2;
+  const pts: Pt[] = [];
+  for (let i = 0; i < n; i++) {
+    const ang = -Math.PI / 2 + (i * 2 * Math.PI) / n;
+    const k = shape === "star" && i % 2 ? 0.45 : 1;
+    pts.push([cx + Math.cos(ang) * rx * k, cy + Math.sin(ang) * ry * k]);
+  }
+  return pts;
+}
+
+/** Kapalı çokgen yolu (SVG / PDF yol sözdizimi). */
+export const polyPath = (pts: Pt[]): string => `${pts.map(([x, y], i) => `${i ? "L" : "M"}${+x.toFixed(5)} ${+y.toFixed(5)}`).join(" ")} Z`;
 
 /** Noktanın doğru parçasına uzaklığının karesi. */
 export function segDistSq([px, py]: Pt, [ax, ay]: Pt, [bx, by]: Pt): number {
@@ -126,7 +153,12 @@ export function hitMark(m: Mark, x: number, y: number, w: number, h: number, tol
   if (m.kind === "shape") {
     const a = toPx(m.from);
     const b = toPx(m.to);
-    if (m.shape === "arrow") return segDistSq(p, a, b) <= tol * tol;
+    if (m.shape === "arrow" || m.shape === "line") return segDistSq(p, a, b) <= tol * tol;
+    const poly = shapePoly(m.shape, m.from, m.to)?.map(toPx);
+    if (poly) {
+      if (inside && pointInPolygon(p, poly)) return true;
+      return poly.some((v, i) => segDistSq(p, v, poly[(i + 1) % poly.length]) <= tol * tol);
+    }
     const [x0, x1] = [Math.min(a[0], b[0]), Math.max(a[0], b[0])];
     const [y0, y1] = [Math.min(a[1], b[1]), Math.max(a[1], b[1])];
     // Seçerken şeklin içi de sayılır (yalnızca ince kenarına basmak zor).
@@ -158,6 +190,12 @@ export function moveMark<M extends Mark>(m: M, dx: number, dy: number): M {
   return { ...m, box: [x + dx, y + dy, w, h] as Rect };
 }
 
+/** Köşeli şekli aynı görünümde düz çizgili (kapalı) çizime çevir. */
+function shapeToInk(m: Extract<Mark, { kind: "shape" }>, pts: Pt[]): Extract<Mark, { kind: "ink" }> {
+  const { shape: _s, from: _f, to: _t, ...rest } = m;
+  return { ...rest, kind: "ink", points: [...pts, pts[0]], straight: true };
+}
+
 /** Düzenle modunda döndürülen sayfa: işaretler de sayfayla birlikte döner. */
 export function rotateMark<M extends Mark>(m: M, degrees: number): M {
   const rp = ([x, y]: Pt): Pt => {
@@ -165,7 +203,12 @@ export function rotateMark<M extends Mark>(m: M, degrees: number): M {
     return [rx, ry];
   };
   if (m.kind === "ink") return { ...m, points: m.points.map(rp) };
-  if (m.kind === "shape") return { ...m, from: rp(m.from), to: rp(m.to) };
+  if (m.kind === "shape") {
+    // Köşeli şeklin yönü kutusundan anlaşılmaz: dönünce düz çizgili çizime çevrilir.
+    const poly = shapePoly(m.shape, m.from, m.to);
+    if (poly) return shapeToInk(m, poly.map(rp)) as unknown as M;
+    return { ...m, from: rp(m.from), to: rp(m.to) };
+  }
   // Metin kutusu ve not okunur kalsın diye dönmez; yalnızca yeri taşınır.
   const box = (m as Extract<Mark, { box: Rect }>).box;
   const [nx, ny] = rotateRect(box, degrees);
@@ -300,7 +343,8 @@ export function scaleMark<M extends Mark>(m: M, ox: number, oy: number, sx: numb
   const [x, y, w, h] = (m as Extract<Mark, { box: Rect }>).box;
   const [nx, ny] = sp([x, y]);
   if (m.kind === "sticky") return { ...m, box: [nx, ny, Math.max(0.08, w * sx), h] as Rect };
-  if (m.kind === "text") return { ...m, box: [nx, ny, w * sx, h * sy] as Rect, size: Math.max(6, Math.round((m.size ?? 14) * Math.sqrt(sx * sy))) } as M;
+  // Tek yönde uzatma (kenar tutamacı) yazı boyutunu değiştirmez; köşeden ölçekleme değiştirir.
+  if (m.kind === "text") return { ...m, box: [nx, ny, w * sx, h * sy] as Rect, size: sx === 1 || sy === 1 ? m.size : Math.max(6, Math.round((m.size ?? 14) * Math.sqrt(sx * sy) * 10) / 10) } as M;
   return { ...m, box: [nx, ny, w * sx, h * sy] as Rect };
 }
 
@@ -309,7 +353,64 @@ export function scaleMark<M extends Mark>(m: M, ox: number, oy: number, sx: numb
 export type Recognized =
   | { type: "line"; pts: [Pt, Pt] }
   | { type: "poly"; pts: Pt[] }
-  | { type: "rect" | "ellipse"; from: Pt; to: Pt };
+  | { type: "rect" | "ellipse" | "diamond"; from: Pt; to: Pt };
+
+/**
+ * Tanınan şekli düzgünleştir: neredeyse yatay/dikey çizgi tam yatay/dikey, neredeyse kare/daire tam kare/daire,
+ * köşeleri kutunun kenar ortalarına düşen dörtgen eşkenar dörtgen olur.
+ */
+export function tidyShape(r: Recognized, w: number, h: number): Recognized {
+  if (r.type === "line") {
+    const [[ax, ay], [bx, by]] = r.pts;
+    const ang = Math.abs(Math.atan2((by - ay) * h, (bx - ax) * w));
+    const tol = 0.07; // ~4°
+    if (ang < tol || Math.PI - ang < tol) return { type: "line", pts: [[ax, (ay + by) / 2], [bx, (ay + by) / 2]] };
+    if (Math.abs(ang - Math.PI / 2) < tol) return { type: "line", pts: [[(ax + bx) / 2, ay], [(ax + bx) / 2, by]] };
+    return r;
+  }
+  if (r.type === "rect" || r.type === "ellipse") {
+    const pw = Math.abs(r.to[0] - r.from[0]) * w;
+    const ph = Math.abs(r.to[1] - r.from[1]) * h;
+    if (Math.abs(pw - ph) / Math.max(pw, ph, 1) > 0.14) return r;
+    const side = (pw + ph) / 2;
+    const cx = (r.from[0] + r.to[0]) / 2;
+    const cy = (r.from[1] + r.to[1]) / 2;
+    return { type: r.type, from: [cx - side / 2 / w, cy - side / 2 / h], to: [cx + side / 2 / w, cy + side / 2 / h] };
+  }
+  if (r.type === "poly") {
+    // Neredeyse yatay / dikey kenarlar tam yatay / dikey olur (üçgenin tabanı, yamuğun kenarları).
+    const pts = r.pts.slice(0, -1).map((p) => [...p] as Pt);
+    const n = pts.length;
+    for (let i = 0; i < n; i++) {
+      const a = pts[i];
+      const b = pts[(i + 1) % n];
+      const ang = Math.abs(Math.atan2((b[1] - a[1]) * h, (b[0] - a[0]) * w));
+      if (ang < 0.09 || Math.PI - ang < 0.09) a[1] = b[1] = (a[1] + b[1]) / 2;
+      else if (Math.abs(ang - Math.PI / 2) < 0.09) a[0] = b[0] = (a[0] + b[0]) / 2;
+    }
+    r = { type: "poly", pts: [...pts, pts[0]] };
+  }
+  if (r.type === "poly" && r.pts.length === 5) {
+    // Dört köşe (kapalı): köşeler kutunun kenar ortalarına yakınsa eşkenar dörtgen.
+    const v = r.pts.slice(0, 4);
+    const xs = v.map((p) => p[0]);
+    const ys = v.map((p) => p[1]);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const mids: Pt[] = [[(x0 + x1) / 2, y0], [x1, (y0 + y1) / 2], [(x0 + x1) / 2, y1], [x0, (y0 + y1) / 2]];
+    const d = Math.hypot((x1 - x0) * w, (y1 - y0) * h) || 1;
+    const near = mids.every((mp) => v.some((p) => Math.hypot((p[0] - mp[0]) * w, (p[1] - mp[1]) * h) < d * 0.14));
+    if (near) return { type: "diamond", from: [x0, y0], to: [x1, y1] };
+  }
+  return r;
+}
+
+/** Tanınan şeklin ekran boyutu (piksel): çizgide uzunluk, kapalı şekilde kutu köşegeni. */
+export function recognizedSize(r: Recognized, w: number, h: number): number {
+  const pts = r.type === "line" || r.type === "poly" ? r.pts : [r.from, r.to];
+  const xs = pts.map((p) => p[0] * w);
+  const ys = pts.map((p) => p[1] * h);
+  return Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+}
 
 /**
  * Elle çizilen şekli tanı (Samsung Notes'taki "çiz ve bekle"): düz çizgi, üçgen, dörtgen, dikdörtgen, elips.
@@ -360,6 +461,8 @@ export function recognizeShape(points: Pt[], w: number, h: number): Recognized |
     return axis ? { type: "rect", ...box } : { type: "poly", pts: [...verts, verts[0]].map(back) };
   }
   if (ellipseErr < 0.16) return { type: "ellipse", ...box };
+  // Beşgen, altıgen, yıldız gibi çok köşeli kapalı şekiller: köşeleri düz çizgilerle birleştir.
+  if (verts.length >= 5 && verts.length <= 12 && ellipseErr > 0.1) return { type: "poly", pts: [...verts, verts[0]].map(back) };
   return null;
 }
 
@@ -391,6 +494,9 @@ export function rotateAround<M extends Mark>(m: M, cx: number, cy: number, ang: 
   };
   if (m.kind === "ink") return { ...m, points: m.points.map(rp) };
   if (m.kind === "shape") {
+    if (m.shape === "line" || m.shape === "arrow") return { ...m, from: rp(m.from), to: rp(m.to) };
+    const poly = shapePoly(m.shape, m.from, m.to);
+    if (poly) return shapeToInk(m, poly.map(rp)) as unknown as M;
     const c = rp([(m.from[0] + m.to[0]) / 2, (m.from[1] + m.to[1]) / 2]);
     const dx = c[0] - (m.from[0] + m.to[0]) / 2;
     const dy = c[1] - (m.from[1] + m.to[1]) / 2;
