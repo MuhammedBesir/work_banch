@@ -195,7 +195,19 @@ export function greedyMatch(a: Pt[], b: Pt[], best = Infinity): number {
 
 // ---------- Şablonlar: hazır + eğik / dar / geniş türevleri + kullanıcının öğrettikleri ----------
 
-interface Template { ch: string; pts: Pt[]; user?: boolean }
+interface Template { ch: string; pts: Pt[]; user?: boolean; marks: number }
+
+/** Harfin küçük işaret sayısı (nokta, çengel, kısa çizgi): i/ı, ü/u, ö/o, ç/c, ş/s, ğ/g'yi ayırır. */
+export function smallMarks(strokes: Strokes): number {
+  const parts = strokes.filter((st) => st.length);
+  if (parts.length < 2) return 0;
+  const all = boxOf(parts);
+  const diag = Math.hypot(all.x1 - all.x0, all.y1 - all.y0) || 1;
+  return parts.filter((st) => {
+    const b = boxOf([st]);
+    return Math.hypot(b.x1 - b.x0, b.y1 - b.y0) < diag * 0.3;
+  }).length;
+}
 const USER_KEY = "cm-hw-templates";
 const MAX_USER = 400;
 let builtIn: Template[] | null = null;
@@ -207,11 +219,11 @@ function variants(strokes: Strokes): Strokes[] {
 }
 
 function templates(): Template[] {
-  builtIn ??= DEFS.flatMap(([ch, strokes]) => variants(strokes).map((v) => ({ ch, pts: cloud(v) })));
+  builtIn ??= DEFS.flatMap(([ch, strokes]) => variants(strokes).map((v) => ({ ch, pts: cloud(v), marks: smallMarks(strokes) })));
   if (!userTpl) {
     try {
-      const raw = JSON.parse(localStorage.getItem(USER_KEY) ?? "[]") as { ch: string; pts: Pt[] }[];
-      userTpl = raw.filter((t) => typeof t.ch === "string" && Array.isArray(t.pts) && t.pts.length === N).map((t) => ({ ...t, user: true }));
+      const raw = JSON.parse(localStorage.getItem(USER_KEY) ?? "[]") as { ch: string; pts: Pt[]; marks?: number }[];
+      userTpl = raw.filter((t) => typeof t.ch === "string" && Array.isArray(t.pts) && t.pts.length === N).map((t) => ({ ch: t.ch, pts: t.pts, marks: t.marks ?? -1, user: true }));
     } catch {
       userTpl = [];
     }
@@ -223,13 +235,21 @@ function templates(): Template[] {
 export function learn(ch: string, strokes: Strokes): void {
   if (!ch.trim() || [...ch].length !== 1 || !strokes.some((s) => s.length > 1)) return;
   templates();
-  userTpl!.unshift({ ch, pts: cloud(strokes), user: true });
+  userTpl!.unshift({ ch, pts: cloud(strokes), marks: smallMarks(strokes), user: true });
   userTpl!.splice(MAX_USER);
   try {
-    localStorage.setItem(USER_KEY, JSON.stringify(userTpl!.map(({ ch: c, pts }) => ({ ch: c, pts: pts.map(([x, y]) => [+x.toFixed(4), +y.toFixed(4)]) }))));
+    localStorage.setItem(USER_KEY, JSON.stringify(userTpl!.map(({ ch: c, pts, marks }) => ({ ch: c, marks, pts: pts.map(([x, y]) => [+x.toFixed(4), +y.toFixed(4)]) }))));
   } catch {
     /* depolama kapalı: öğrenilen yalnızca bu oturumda kalır */
   }
+}
+
+/** Öğrenilen şablon sayısı (harf başına). */
+export function learnedCount(): Map<string, number> {
+  templates();
+  const m = new Map<string, number>();
+  for (const t of userTpl!) m.set(t.ch, (m.get(t.ch) ?? 0) + 1);
+  return m;
 }
 
 export function forgetLearned(): void {
@@ -242,17 +262,20 @@ export function forgetLearned(): void {
 }
 
 /** Tek harf: en iyi aday, uzaklığı ve farklı bir harfin en iyi uzaklığı. Kullanıcı şablonları hafif öncelikli. */
-export function classify(strokes: Strokes): { ch: string; d: number; d2: number } {
+export function classify(strokes: Strokes): { ch: string; d: number; d2: number; cands: { ch: string; d: number }[] } {
   const c = cloud(strokes);
+  const marks = smallMarks(strokes);
   const best = new Map<string, number>();
   let bound = Infinity;
   for (const t of templates()) {
-    const d = greedyMatch(c, t.pts, Math.min(bound * 1.6, (best.get(t.ch) ?? Infinity))) * (t.user ? 0.9 : 1);
+    // Nokta / çengel sayısı tutmuyorsa (u'ya ü, e'ye Ğ) ceza: $P'de küçük işaretler az nokta tutar, kolay kaybolur.
+    const pen = t.marks < 0 || t.marks === marks ? 1 : 1.3 + 0.15 * Math.abs(t.marks - marks);
+    const d = greedyMatch(c, t.pts, Math.min(bound * 1.6, (best.get(t.ch) ?? Infinity)) / pen) * pen * (t.user ? 0.85 : 1);
     if (d < (best.get(t.ch) ?? Infinity)) best.set(t.ch, d);
     bound = Math.min(bound, d);
   }
   const sorted = [...best.entries()].sort((a, b) => a[1] - b[1]);
-  return { ch: sorted[0][0], d: sorted[0][1], d2: sorted[1]?.[1] ?? Infinity };
+  return { ch: sorted[0][0], d: sorted[0][1], d2: sorted[1]?.[1] ?? Infinity, cands: sorted.slice(0, 10).map(([ch, d]) => ({ ch, d })) };
 }
 
 // ---------- Satır tanıma: harflere ve kelimelere ayır, sınıflandır, büyük/küçük harf ve rakam bağlamı ----------
@@ -265,12 +288,16 @@ export interface HwLine {
   /** Satırın kutusu (0–1) ve büyük harf yüksekliği (piksel). */
   box: [number, number, number, number];
   capPx: number;
+  /** Bütün harfler sıkı eşiğin altında mı? Değilse yalnızca öneri olarak gösterilir. */
+  confident: boolean;
 }
 
 /** Tanıma güveni: bu uzaklığın üstündeki harf tanınmamış sayılır ($P uzaklığı, normalize birimde). */
 const MAX_D = 1.7;
 /** Satırda tek harf varsa daha sıkı: tek başına çizgi ya da karalama harf sanılmasın. */
 const MAX_D_SINGLE = 1.15;
+/** Öneri eşiği: bundan uzak harf varsa satır hiç önerilmez (çizim ya da karalama). */
+const MAX_D_SUGGEST = 2.6;
 
 const median = (a: number[]) => {
   const s = [...a].sort((x, y) => x - y);
@@ -305,40 +332,106 @@ export function recognizeLine(input: Strokes, w: number, h: number): HwLine | nu
   // Satır gibi değilse (çok yüksek ya da tek dev çizim) tanıma: şekil ya da çizim olabilir.
   if (lineBox.y1 - lineBox.y0 > unit * 3.2 || unit > 160) return null;
 
-  // Harflere ayır: x aralığı örtüşen ya da küçük (nokta, kanca) çizgiler aynı harf.
-  const order = strokes.map((_, i) => i).sort((a, b) => sb[a].x0 - sb[b].x0);
-  const groups: { idx: number[]; b: Box }[] = [];
-  for (const i of order) {
+  // Harflere ayır. Bir harfin çizgileri art arda yazılır: yazılış sırasında öncekiyle örtüşen ya da ona değen
+  // çizgi aynı harf. Küçük çizgiler (i/ü/ö noktası, ç/ş çengeli, ğ'nin kaşı) sonradan da konabilir: altındaki harfe.
+  type Group = { idx: number[]; b: Box };
+  const grow = (g: Group, i: number) => {
     const b = sb[i];
-    const small = Math.hypot(b.x1 - b.x0, b.y1 - b.y0) < unit * 0.45;
-    let target: (typeof groups)[number] | null = null;
-    for (const g of groups.slice(-2).reverse()) {
-      const ov = Math.min(g.b.x1, b.x1) - Math.max(g.b.x0, b.x0);
-      const narrow = Math.min(g.b.x1 - g.b.x0, b.x1 - b.x0) || 1;
-      // Dikey sap (m, n, k, h, b'nin sapı) yanındaki kemere / kollara değiyorsa aynı harf.
-      const stem = Math.min(g.b.x1 - g.b.x0, b.x1 - b.x0) < unit * 0.2;
-      // Art arda yazılıp birbirine değen çizgiler (m'nin iki kemeri) aynı harf.
-      const consecutive = g.idx.includes(i - 1) || g.idx.includes(i + 1);
-      const touching = consecutive && ov > -unit * 0.08;
-      // Sap ve hemen ardından yazılan kollar (k, h, b): kol saptan biraz ayrık başlayabilir.
-      const stemH = Math.max(g.b.x1 - g.b.x0 < b.x1 - b.x0 ? g.b.y1 - g.b.y0 : b.y1 - b.y0, unit);
-      const stemArm = stem && consecutive && ov > -stemH * 0.25 && Math.abs(g.b.y1 - b.y1) < stemH * 0.4;
-      if (ov > narrow * 0.3 || (small && ov > -unit * 0.15) || (stem && ov > -unit * 0.1) || touching || stemArm) {
-        target = g;
-        break;
+    g.idx.push(i);
+    g.b = { x0: Math.min(g.b.x0, b.x0), y0: Math.min(g.b.y0, b.y0), x1: Math.max(g.b.x1, b.x1), y1: Math.max(g.b.y1, b.y1) };
+  };
+  const isSmall = (i: number) => Math.hypot(sb[i].x1 - sb[i].x0, sb[i].y1 - sb[i].y0) < unit * 0.45;
+  const joins = (g: Group, i: number) => {
+    const b = sb[i];
+    const ov = Math.min(g.b.x1, b.x1) - Math.max(g.b.x0, b.x0);
+    const narrow = Math.min(g.b.x1 - g.b.x0, b.x1 - b.x0) || 1;
+    const stem = Math.min(g.b.x1 - g.b.x0, b.x1 - b.x0) < unit * 0.2;
+    const stemH = Math.max(g.b.x1 - g.b.x0 < b.x1 - b.x0 ? g.b.y1 - g.b.y0 : b.y1 - b.y0, unit);
+    return ov > narrow * 0.3 || (stem && ov > -stemH * 0.25 && Math.abs(g.b.y1 - b.y1) < stemH * 0.4) || ov > -unit * 0.08;
+  };
+  let groups: Group[] = [];
+  const smalls: number[] = [];
+  strokes.forEach((_, i) => {
+    if (isSmall(i) && groups.length) return smalls.push(i);
+    const last = groups[groups.length - 1];
+    if (last && joins(last, i)) grow(last, i);
+    else groups.push({ idx: [i], b: { ...sb[i] } });
+  });
+  for (const i of smalls) {
+    const cx = (sb[i].x0 + sb[i].x1) / 2;
+    let best: Group | null = null;
+    let bd = Infinity;
+    for (const g of groups) {
+      const dx = cx < g.b.x0 ? g.b.x0 - cx : cx > g.b.x1 ? cx - g.b.x1 : 0;
+      if (dx < unit * 0.25 && dx < bd) {
+        bd = dx;
+        best = g;
       }
     }
-    if (target) {
-      target.idx.push(i);
-      target.b = { x0: Math.min(target.b.x0, b.x0), y0: Math.min(target.b.y0, b.y0), x1: Math.max(target.b.x1, b.x1), y1: Math.max(target.b.y1, b.y1) };
-    } else groups.push({ idx: [i], b: { ...b } });
+    if (best) grow(best, i);
+    else groups.push({ idx: [i], b: { ...sb[i] } });
+  }
+  groups.sort((a, b) => a.b.x0 - b.b.x0);
+
+  // Düzeltme turu: şüpheli harfi ikiye bölmek ya da şüpheli komşuları birleştirmek daha iyi okunuyorsa öyle yap.
+  const cache = new Map<string, ReturnType<typeof classify>>();
+  const cls = (idx: number[]) => {
+    const key = [...idx].sort((a, b) => a - b).join(",");
+    let r = cache.get(key);
+    if (!r) cache.set(key, (r = classify(idx.map((i) => strokes[i]))));
+    return r;
+  };
+  const boxIdx = (idx: number[]) => boxOf(idx.map((i) => strokes[i]));
+  const SUSPECT = MAX_D * 0.7;
+  for (let k = 0; k < groups.length; k++) {
+    const g = groups[k];
+    const big = g.idx.filter((i) => !isSmall(i)).sort((a, b) => a - b);
+    if (big.length < 2 || cls(g.idx).d <= SUSPECT) continue;
+    let bestSplit: [number[], number[]] | null = null;
+    let bestScore = cls(g.idx).d;
+    for (let cut = 1; cut < big.length; cut++) {
+      const a = big.slice(0, cut);
+      const b2 = big.slice(cut);
+      const ba = boxIdx(a);
+      const bb = boxIdx(b2);
+      if (Math.min(ba.x1, bb.x1) - Math.max(ba.x0, bb.x0) > Math.min(ba.x1 - ba.x0, bb.x1 - bb.x0) * 0.6) continue; // üst üste: bölünmez
+      const score = Math.max(cls(a).d, cls(b2).d);
+      if (score < bestScore * 0.75) {
+        bestScore = score;
+        bestSplit = [a, b2];
+      }
+    }
+    if (bestSplit) {
+      const parts = bestSplit.map((idx) => ({ idx, b: boxIdx(idx) }));
+      for (const i of g.idx.filter((x) => isSmall(x))) {
+        const cx = (sb[i].x0 + sb[i].x1) / 2;
+        const tgt = parts.reduce((p, q) => (Math.abs((p.b.x0 + p.b.x1) / 2 - cx) <= Math.abs((q.b.x0 + q.b.x1) / 2 - cx) ? p : q));
+        tgt.idx.push(i);
+        tgt.b = boxIdx(tgt.idx);
+      }
+      groups.splice(k, 1, ...parts.sort((p, q) => p.b.x0 - q.b.x0));
+      k--;
+    }
+  }
+  for (let k = 0; k + 1 < groups.length; k++) {
+    const a = groups[k];
+    const b2 = groups[k + 1];
+    const ra = cls(a.idx);
+    const rb = cls(b2.idx);
+    if (Math.max(ra.d, rb.d) <= SUSPECT || b2.b.x0 - a.b.x1 > unit * 0.25) continue;
+    const m = cls([...a.idx, ...b2.idx]);
+    if (m.d < Math.min(ra.d, rb.d) * 0.85 && m.d <= MAX_D) {
+      groups.splice(k, 2, { idx: [...a.idx, ...b2.idx], b: boxIdx([...a.idx, ...b2.idx]) });
+      k--;
+    }
   }
   if (groups.length > 60) return null;
 
   const gh = groups.map((g) => g.b.y1 - g.b.y0);
   const capH = Math.max(...gh);
   const baseline = median(groups.filter((_, k) => gh[k] > capH * 0.3).map((g) => g.b.y1));
-  const results: { ch: string; g: (typeof groups)[number]; tiny: boolean }[] = [];
+  const results: { ch: string; g: (typeof groups)[number]; tiny: boolean; cands?: { ch: string; d: number }[] }[] = [];
+  let confident = true;
   for (const g of groups) {
     const gs = g.idx.map((i) => strokes[i]);
     const hgt = g.b.y1 - g.b.y0;
@@ -348,11 +441,13 @@ export function recognizeLine(input: Strokes, w: number, h: number): HwLine | nu
       results.push({ ch: g.b.y1 > baseline + capH * 0.12 ? "," : ".", g, tiny: true });
       continue;
     }
-    const r = classify(gs);
-    if (r.d > (groups.length === 1 ? MAX_D_SINGLE : MAX_D)) return null;
+    void gs;
+    const r = cls(g.idx);
+    if (r.d > (groups.length === 1 ? MAX_D_SINGLE : MAX_D_SUGGEST)) return null;
+    if (r.d > MAX_D) confident = false;
     // Tek başına çizgi, daire, tik ya da işaret yazı sayılmaz (altı çizme, madde imi, onay işareti olabilir).
     if (groups.length === 1 && LONE_AMBIGUOUS.has(r.ch)) return null;
-    results.push({ ch: r.ch, g, tiny: false });
+    results.push({ ch: r.ch, g, tiny: false, cands: r.cands });
   }
 
   // Kelimeler: harfler arası boşluk birimin yarısından büyükse.
@@ -368,15 +463,28 @@ export function recognizeLine(input: Strokes, w: number, h: number): HwLine | nu
   const capsLine = all.some((c) => UPPER_ONLY.has(c)) && !all.some((c) => LOWER_ONLY.has(c));
   const hasShort = gh.some((v) => v < capH * 0.72);
 
+  // Bağlam: satır küçük harfle mi yazılıyor? Küçük harf satırında büyük harfe özgü biçimler (R, D, N, İ…)
+  // yalnızca kelimenin ilk harfinde ve açıkça daha iyiyse seçilir; rakam kelimesinde rakam, harf kelimesinde harf öne çıkar.
+  const lowerVotes = all.filter((c) => LOWER_ONLY.has(c) || /[a-zçğıöşü]/.test(c)).length;
+  const upperVotes = all.filter((c) => UPPER_ONLY.has(c)).length;
+  const lowerLine = lowerVotes > upperVotes;
+  const isDigitish = (c: string) => /[\d+\-=×/()]/.test(c);
+  const isLetter = (c: string) => /\p{L}/u.test(c);
   const out: string[] = [];
   const glyphs: HwGlyph[] = [];
   for (const word of words) {
     const letters = word.filter((r) => !r.tiny);
-    const digitCount = letters.filter((r) => /[\d+\-=×/()]/.test(r.ch)).length;
-    const numeric = letters.length > 0 && digitCount * 2 >= letters.length;
+    const digitCount = letters.filter((r) => isDigitish(r.ch) || (r.cands ?? []).slice(0, 3).some((c) => /\d/.test(c.ch) && c.d <= r.cands![0].d * 1.15)).length;
+    const numeric = letters.length > 0 && digitCount * 2 > letters.length;
     let s = "";
-    for (const r of word) {
+    word.forEach((r, pos) => {
       let ch = r.ch;
+      if (!r.tiny && r.cands?.length) {
+        const top = r.cands[0].d;
+        const ok = (c: string) => (numeric ? isDigitish(c) || !!DIGITISH[c] : isLetter(c) || !!LETTERISH[c])
+          && !(lowerLine && !numeric && UPPER_ONLY.has(c) && (pos > 0 || r.cands![0].ch !== c));
+        ch = r.cands.find((c) => ok(c.ch) && c.d <= top * 1.35)?.ch ?? ch;
+      }
       const hgt = r.g.b.y1 - r.g.b.y0;
       const desc = r.g.b.y1 > baseline + capH * 0.22;
       if (!r.tiny) {
@@ -392,7 +500,7 @@ export function recognizeLine(input: Strokes, w: number, h: number): HwLine | nu
       }
       s += ch;
       glyphs.push({ ch, strokes: r.g.idx.map((i) => input[i]) });
-    }
+    });
     out.push(s);
   }
   const text = out.join(" ");
@@ -402,5 +510,6 @@ export function recognizeLine(input: Strokes, w: number, h: number): HwLine | nu
     glyphs,
     box: [lineBox.x0 / w, lineBox.y0 / h, (lineBox.x1 - lineBox.x0) / w, (lineBox.y1 - lineBox.y0) / h],
     capPx: capH,
+    confident,
   };
 }

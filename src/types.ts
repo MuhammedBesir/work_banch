@@ -192,7 +192,7 @@ export interface Settings {
   railOpen: boolean;
   panelOpen: boolean;
   ai: AiSettings;
-  pen: { color: InkColor; width: number; kind?: PenKind; custom?: string[]; textSize?: number; autoShape?: boolean; smooth?: number; autoText?: boolean };
+  pen: { color: InkColor; width: number; kind?: PenKind; custom?: string[]; textSize?: number; autoShape?: boolean; smooth?: number; autoText?: boolean; textMode?: "suggest" | "auto" | "off" };
   /** İsteğe bağlı yerel hata günlüğü (hiçbir yere gönderilmez). */
   errorLog: boolean;
   /** Son açılanlar görünümü. */

@@ -1139,6 +1139,8 @@ async function openReader(file: OpenDoc): Promise<void> {
     },
     remove: removeMark,
     redraw: drawMarks,
+    // El yazını öğret: tanıyıcıyla birlikte yalnızca açılınca yüklenir.
+    teach: () => void import("./ui/teach").then((m) => m.openTeach(announce)),
     pen: (pen) => void changeSettings({ ...settings, pen }),
     handwriting: (list, page, mode) => handwritingDialog(list, page, mode),
     announce,

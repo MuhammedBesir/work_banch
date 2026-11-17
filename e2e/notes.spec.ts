@@ -250,8 +250,9 @@ test("Şekiller: otomatik düzeltme, geri alınca ham çizim, yeni şekiller ve 
 test("El yazısı: eğik satır ara verince düzelir, Ctrl Z geri alır; yumuşatma düzeyi değişir", async ({ page }) => {
   await newNotebook(page);
   await page.keyboard.press("p");
-  // Bu testte yalnızca satır düzeltme: yazıya çevirme kapalı.
-  await page.getByRole("button", { name: /Yazıya çevir: açık/ }).click();
+  // Bu testte yalnızca satır düzeltme: yazıya çevirme kapalı (öneri → otomatik → kapalı).
+  await page.getByRole("button", { name: /Yazıya çevir: öneri/ }).click();
+  await page.getByRole("button", { name: /Yazıya çevir: otomatik/ }).click();
   const box = (await page.locator('.cm-page[data-page="0"]').boundingBox())!;
   const tilt = Math.tan((8 * Math.PI) / 180);
   // Altı "harf", soldan sağa ~8° yükselen bir satırda.
@@ -278,7 +279,7 @@ test("El yazısı: eğik satır ara verince düzelir, Ctrl Z geri alır; yumuşa
   await expect(page.getByRole("button", { name: /Yazı yumuşatma: kapalı/ })).toBeVisible();
 });
 
-test("El yazısı yazıya çevrilir: 25 → metin kutusu, Ctrl Z el yazısını geri getirir", async ({ page }) => {
+test("El yazısı yazıya çevrilir: öneri çıkar, düzeltilir, Enter çevirir, Ctrl Z geri getirir; öğret penceresi", async ({ page }) => {
   await newNotebook(page);
   await page.keyboard.press("p");
   const box = (await page.locator('.cm-page[data-page="0"]').boundingBox())!;
@@ -293,9 +294,29 @@ test("El yazısı yazıya çevrilir: 25 → metin kutusu, Ctrl Z el yazısını 
   await write([[0.55, 0.02], [0.08, 0.04], [0.05, 0.45], [0.35, 0.4], [0.55, 0.62], [0.45, 0.92], [0.05, 0.95]], 128, 200);
   const ink = page.locator('.cm-page[data-page="0"] .cm-ink path');
   await expect(ink).toHaveCount(2);
-  await expect(page.locator(".cm-textbox")).toHaveText("25", { timeout: 5_000 });
+  // Öneri kutusu: tanınan metin düzenlenebilir; düzeltip Enter.
+  const sug = page.getByRole("textbox", { name: /Tanınan yazı/ });
+  await expect(sug).toHaveValue("25", { timeout: 5_000 });
+  await expect(sug).toBeFocused();
+  await sug.fill("26");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".cm-textbox")).toHaveText("26");
   await expect(ink).toHaveCount(0);
   await page.keyboard.press("Control+z");
   await expect(page.locator(".cm-textbox")).toHaveCount(0);
   await expect(ink).toHaveCount(2);
+  // Düzeltilen "6" öğrenildi: öğret penceresinde rozet görünür.
+  await page.getByRole("button", { name: /El yazını öğret/ }).click();
+  await page.getByRole("button", { name: "Rakamlar" }).click();
+  await expect(page.locator(".cm-teach__cell", { hasText: "6" }).locator(".cm-teach__n")).toHaveText("1");
+  // Bir kutuya yazıp kaydet.
+  const cell = page.getByRole("img", { name: "7 karakterini yaz" }).or(page.locator('canvas[aria-label="7 karakterini yaz"]')).first();
+  const cb = (await cell.boundingBox())!;
+  await page.mouse.move(cb.x + 15, cb.y + 15);
+  await page.mouse.down();
+  await page.mouse.move(cb.x + 65, cb.y + 15, { steps: 4 });
+  await page.mouse.move(cb.x + 30, cb.y + 70, { steps: 4 });
+  await page.mouse.up();
+  await page.getByRole("button", { name: "Kaydet" }).click();
+  await expect(page.locator(".cm-dialog")).toHaveCount(0);
 });

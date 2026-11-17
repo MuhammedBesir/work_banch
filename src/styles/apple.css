@@ -518,3 +518,25 @@ body { letter-spacing: -0.01em; text-rendering: optimizeLegibility; }
 .cm-tool__level i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: .3; }
 .cm-tool__level i.is-on { opacity: 1; }
 @media (max-width: 720px) { .cm-tool__level { right: 3px; top: auto; bottom: 4px; transform: none; } }
+
+/* El yazısı önerisi: el yazısının altında, cam kutu, düzenlenebilir metin. */
+.cm-hwsug { position: absolute; z-index: 9; display: flex; align-items: center; gap: 4px; padding: 4px 4px 4px 8px; border-radius: 12px;
+  background: var(--glass); backdrop-filter: saturate(180%) blur(20px); -webkit-backdrop-filter: saturate(180%) blur(20px); box-shadow: var(--shadow-float);
+  pointer-events: auto; zoom: var(--ui-zoom); animation: cm-float-in .14s ease-out; }
+.cm-hwsug__icon { color: var(--accent); display: grid; place-items: center; }
+.cm-hwsug__icon .cm-icon { width: 16px; height: 16px; }
+.cm-hwsug__input { border: 0; background: var(--fill); border-radius: 8px; padding: 5px 8px; font: 600 16px/20px var(--font-sans); color: var(--ink); min-width: 4ch; }
+.cm-hwsug__input:focus { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 30%, transparent); }
+.cm-hwsug__btn { width: 30px; height: 30px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-muted); display: grid; place-items: center; cursor: pointer; }
+.cm-hwsug__btn:hover { background: var(--fill); color: var(--ink); }
+.cm-hwsug__btn--ok { background: var(--accent-fill); color: #fff; }
+.cm-hwsug__btn--ok:hover { background: var(--accent-fill-hover); color: #fff; }
+.cm-hwsug__btn .cm-icon { width: 16px; height: 16px; }
+/* El yazını öğret */
+.cm-teach__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; margin: 14px 0 8px; max-height: 52vh; overflow: auto; padding: 2px; }
+.cm-teach__cell { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.cm-teach__canvas { width: 84px; height: 84px; border-radius: 12px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line-strong); touch-action: none; cursor: crosshair; }
+.cm-teach__label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.cm-teach__n { min-width: 18px; height: 18px; display: grid; place-items: center; border-radius: 9px; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 600; }
+.cm-teach__clear { position: absolute; top: 2px; right: calc(50% - 44px); width: 20px; height: 20px; border: 0; border-radius: 50%; background: var(--fill); color: var(--ink-muted); cursor: pointer; line-height: 1; }
+.cm-teach__status { margin: 4px 0 0; font-size: 13px; }

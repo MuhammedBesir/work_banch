@@ -131,12 +131,12 @@ describe("el yazısı tanıma", () => {
 describe("el yazısını öğrenme", () => {
   it("düzeltilen harf kullanıcı şablonu olur, aynı biçim artık o harf tanınır", async () => {
     const { classify, learn, forgetLearned } = await import("../src/write/hwr");
-    // Kimsenin şablonuna benzemeyen tuhaf bir "ğ".
-    const odd: Pt[][] = [[[0, 0], [0.3, 0.9], [0.6, 0.1], [0.9, 0.9]], [[0.2, 1.2], [0.5, 1.4]]];
-    expect(classify(odd).ch).not.toBe("ğ");
-    learn("ğ", odd);
-    expect(classify(odd).ch).toBe("ğ");
+    // "a"ya hiç benzemeyen tuhaf bir çizim: kullanıcı bunu "a" diye öğretir.
+    const odd: Pt[][] = [[[0, 0.5], [0.15, 0], [0.3, 1], [0.45, 0], [0.6, 1], [0.75, 0], [0.9, 0.5]]];
+    expect(classify(odd).ch).not.toBe("a");
+    learn("a", odd);
+    expect(classify(odd).ch).toBe("a");
     forgetLearned();
-    expect(classify(odd).ch).not.toBe("ğ");
+    expect(classify(odd).ch).not.toBe("a");
   });
 });
