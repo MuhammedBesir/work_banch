@@ -512,3 +512,9 @@ body { letter-spacing: -0.01em; text-rendering: optimizeLegibility; }
 @media (max-width: 720px) {
   .cm-stagewrap > .cm-palette .cm-tool--wide { grid-column: auto; width: 40px; }
 }
+/* Yazı yumuşatma düğmesi: düzey göstergesi (iki nokta). */
+.cm-palette .cm-tool--smooth { position: relative; }
+.cm-tool__level { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); display: flex; gap: 3px; }
+.cm-tool__level i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: .3; }
+.cm-tool__level i.is-on { opacity: 1; }
+@media (max-width: 720px) { .cm-tool__level { right: 3px; top: auto; bottom: 4px; transform: none; } }

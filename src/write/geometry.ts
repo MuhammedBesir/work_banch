@@ -466,6 +466,49 @@ export function recognizeShape(points: Pt[], w: number, h: number): Recognized |
   return null;
 }
 
+// ---------- El yazısını düzgünleştirme ----------
+
+/**
+ * Titreme süzgeci (kalem dengeleyici): her yeni nokta bir öncekine doğru `s` oranında geride kalır.
+ * 0 kapalı; 0,4 hafif; 0,62 güçlü. Noktalar 0–1.
+ */
+export function stabilize(prev: Pt | null, raw: Pt, s: number): Pt {
+  if (!prev || s <= 0) return raw;
+  return [prev[0] + (raw[0] - prev[0]) * (1 - s), prev[1] + (raw[1] - prev[1]) * (1 - s)];
+}
+
+/**
+ * Bitmiş çizgiyi yumuşat: uçları sabit tutan üç noktalı kayan ortalama, `passes` kez.
+ * Basınç dizisi (varsa) noktalarla aynı uzunlukta kalır. Kısa çizgilere (nokta, virgül) dokunulmaz.
+ */
+export function smoothStroke(points: Pt[], passes: number): Pt[] {
+  if (passes <= 0 || points.length < 5) return points;
+  let cur = points;
+  for (let k = 0; k < passes; k++) {
+    const next = cur.map((p) => [...p] as Pt);
+    for (let i = 1; i < cur.length - 1; i++) {
+      next[i] = [(cur[i - 1][0] + cur[i][0] * 2 + cur[i + 1][0]) / 4, (cur[i - 1][1] + cur[i][1] * 2 + cur[i + 1][1]) / 4];
+    }
+    cur = next;
+  }
+  return cur;
+}
+
+/**
+ * El yazısı satırı mı ve ne kadar eğik? Satır: en az üç çizgi, genişliği yüksekliğinin üç katından fazla ve
+ * en az `minWidthPx`. Eğim 2,5°–15° arasındaysa döndürme açısı (radyan), değilse 0.
+ */
+export function lineTilt(marks: Mark[], w: number, h: number, minWidthPx = 120): number {
+  const ink = marks.filter((m) => m.kind === "ink" && !m.straight);
+  if (ink.length < 3) return 0;
+  const [, , bw, bh] = unionBox(ink)!;
+  const wPx = bw * w;
+  if (wPx < minWidthPx || wPx < bh * h * 3) return 0;
+  const ang = inkSlope(ink, w, h);
+  const deg = Math.abs((ang * 180) / Math.PI);
+  return deg >= 2.5 && deg <= 15 ? ang : 0;
+}
+
 // ---------- El yazısını düzleştirme ----------
 
 /** Çizgilerin genel eğimi (radyan, piksel uzayında; en küçük kareler). */

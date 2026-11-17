@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hitMark, recognizeShape, recognizedSize, scaleMark, shapePoly, tidyShape } from "../src/write/geometry";
+import { hitMark, lineTilt, recognizeShape, recognizedSize, scaleMark, shapePoly, smoothStroke, stabilize, tidyShape } from "../src/write/geometry";
 import type { Mark } from "../src/types";
 
 const W = 800;
@@ -70,5 +70,40 @@ describe("yeni şekiller", () => {
     const m = { id: "x", fileHash: "h", page: 0, kind: "text", color: "blue", box: [0.1, 0.1, 0.3, 0.05], text: "a", size: 16, createdAt: 0, updatedAt: 0 } as Mark;
     expect((scaleMark(m, 0.1, 0.1, 2, 2) as { size: number }).size).toBe(32);
     expect((scaleMark(m, 0.1, 0.1, 2, 1) as { size: number }).size).toBe(16);
+  });
+});
+
+describe("el yazısı düzgünleştirme", () => {
+  it("titreme süzgeci yeni noktayı öncekine doğru çeker", () => {
+    expect(stabilize(null, [0.5, 0.5], 0.4)).toEqual([0.5, 0.5]);
+    const p = stabilize([0, 0], [1, 1], 0.4);
+    expect(p[0]).toBeCloseTo(0.6);
+    expect(stabilize([0, 0], [1, 1], 0)).toEqual([1, 1]);
+  });
+  it("yumuşatma uçları korur, zikzağı azaltır, kısa çizgiye dokunmaz", () => {
+    const zig: Pt[] = Array.from({ length: 12 }, (_, i) => [i / 100, 0.5 + (i % 2 ? 0.01 : -0.01)]);
+    const out = smoothStroke(zig, 2);
+    expect(out[0]).toEqual(zig[0]);
+    expect(out[out.length - 1]).toEqual(zig[zig.length - 1]);
+    const amp = (ps: Pt[]) => Math.max(...ps.slice(2, -2).map((p) => Math.abs(p[1] - 0.5)));
+    expect(amp(out)).toBeLessThan(amp(zig) / 2);
+    const dot: Pt[] = [[0.1, 0.1], [0.1, 0.11], [0.11, 0.11]];
+    expect(smoothStroke(dot, 2)).toBe(dot);
+  });
+  it("eğik yazı satırı tanınır; düz satır, tek kelime ve şekil tanınmaz", () => {
+    const ink = (pts: Pt[]): Mark => ({ id: Math.random().toString(), fileHash: "h", page: 0, kind: "ink", color: "blue", width: 2, points: pts, createdAt: 0, updatedAt: 0 } as Mark);
+    // 5 "harf", her biri soldan sağa 8° yükselen bir çizgi üstünde.
+    const tilt = Math.tan((8 * Math.PI) / 180);
+    const letter = (i: number, slope: number): Mark => {
+      const cx = 100 + i * 60;
+      const cy = 500 - (cx - 100) * slope;
+      return ink([[cx / W, (cy + 15) / H], [(cx + 10) / W, (cy - 15) / H], [(cx + 20) / W, (cy + 15) / H]]);
+    };
+    const tilted = [0, 1, 2, 3, 4].map((i) => letter(i, tilt));
+    const ang = lineTilt(tilted, W, H);
+    expect(Math.abs((ang * 180) / Math.PI)).toBeGreaterThan(5);
+    expect(lineTilt([0, 1, 2, 3, 4].map((i) => letter(i, 0)), W, H)).toBe(0); // zaten düz
+    expect(lineTilt(tilted.slice(0, 2), W, H)).toBe(0); // en az 3 çizgi
+    expect(lineTilt([0, 1, 2, 3, 4].map((i) => letter(i, Math.tan((40 * Math.PI) / 180))), W, H)).toBe(0); // bilerek eğik çizim
   });
 });

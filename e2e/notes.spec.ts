@@ -213,7 +213,7 @@ test("Şekiller: otomatik düzeltme, geri alınca ham çizim, yeni şekiller ve 
   await page.keyboard.press("Control+z");
   await expect(marks).toHaveCount(0);
   // Otomatik düzeltme kapatılınca çizim olduğu gibi kalır.
-  await page.getByRole("button", { name: /Otomatik şekil düzeltme: açık/ }).click();
+  await page.getByRole("button", { name: /Otomatik düzeltme: açık/ }).click();
   await stroke(Array.from({ length: 33 }, (_, i) => [300 + Math.cos((i / 32) * 2 * Math.PI) * 70, 150 + Math.sin((i / 32) * 2 * Math.PI) * 66] as [number, number]));
   await expect(page.locator('.cm-page[data-page="0"] .cm-ink ellipse')).toHaveCount(0);
   await expect(marks).toHaveCount(1);
@@ -245,4 +245,33 @@ test("Şekiller: otomatik düzeltme, geri alınca ham çizim, yeni şekiller ve 
   await page.getByRole("button", { name: "Yazıyı büyüt" }).click();
   await page.keyboard.press("Escape");
   expect(parseFloat(await page.locator(".cm-textbox").evaluate((el) => (el as HTMLElement).style.getPropertyValue("--fs")))).toBeGreaterThan(16);
+});
+
+test("El yazısı: eğik satır ara verince düzelir, Ctrl Z geri alır; yumuşatma düzeyi değişir", async ({ page }) => {
+  await newNotebook(page);
+  await page.keyboard.press("p");
+  const box = (await page.locator('.cm-page[data-page="0"]').boundingBox())!;
+  const tilt = Math.tan((8 * Math.PI) / 180);
+  // Altı "harf", soldan sağa ~8° yükselen bir satırda.
+  for (let i = 0; i < 6; i++) {
+    const x = 70 + i * 26;
+    const y = 300 - (x - 70) * tilt;
+    await page.mouse.move(box.x + x, box.y + y + 20);
+    await page.mouse.down();
+    await page.mouse.move(box.x + x + 6, box.y + y, { steps: 3 });
+    await page.mouse.move(box.x + x + 12, box.y + y + 20, { steps: 3 });
+    await page.mouse.up();
+  }
+  const centers = () => page.evaluate(() => [...document.querySelectorAll('.cm-page[data-page="0"] .cm-ink path')].map((n) => { const r = n.getBoundingClientRect(); return r.y + r.height / 2; }));
+  const spread = (a: number[]) => Math.max(...a) - Math.min(...a);
+  const before = spread(await centers());
+  expect(before).toBeGreaterThan(12);
+  await expect.poll(async () => spread(await centers()), { timeout: 4_000 }).toBeLessThan(4);
+  await page.keyboard.press("Control+z");
+  await expect.poll(async () => spread(await centers())).toBeGreaterThan(12);
+  // Yumuşatma: hafif → güçlü → kapalı.
+  await page.getByRole("button", { name: /Yazı yumuşatma: hafif/ }).click();
+  await expect(page.getByRole("button", { name: /Yazı yumuşatma: güçlü/ })).toBeVisible();
+  await page.getByRole("button", { name: /Yazı yumuşatma: güçlü/ }).click();
+  await expect(page.getByRole("button", { name: /Yazı yumuşatma: kapalı/ })).toBeVisible();
 });
