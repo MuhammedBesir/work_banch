@@ -250,6 +250,8 @@ test("Şekiller: otomatik düzeltme, geri alınca ham çizim, yeni şekiller ve 
 test("El yazısı: eğik satır ara verince düzelir, Ctrl Z geri alır; yumuşatma düzeyi değişir", async ({ page }) => {
   await newNotebook(page);
   await page.keyboard.press("p");
+  // Bu testte yalnızca satır düzeltme: yazıya çevirme kapalı.
+  await page.getByRole("button", { name: /Yazıya çevir: açık/ }).click();
   const box = (await page.locator('.cm-page[data-page="0"]').boundingBox())!;
   const tilt = Math.tan((8 * Math.PI) / 180);
   // Altı "harf", soldan sağa ~8° yükselen bir satırda.
@@ -274,4 +276,26 @@ test("El yazısı: eğik satır ara verince düzelir, Ctrl Z geri alır; yumuşa
   await expect(page.getByRole("button", { name: /Yazı yumuşatma: güçlü/ })).toBeVisible();
   await page.getByRole("button", { name: /Yazı yumuşatma: güçlü/ }).click();
   await expect(page.getByRole("button", { name: /Yazı yumuşatma: kapalı/ })).toBeVisible();
+});
+
+test("El yazısı yazıya çevrilir: 25 → metin kutusu, Ctrl Z el yazısını geri getirir", async ({ page }) => {
+  await newNotebook(page);
+  await page.keyboard.press("p");
+  const box = (await page.locator('.cm-page[data-page="0"]').boundingBox())!;
+  const write = async (pts: [number, number][], x: number, y: number, size = 34) => {
+    await page.mouse.move(box.x + x + pts[0][0] * size, box.y + y + pts[0][1] * size);
+    await page.mouse.down();
+    for (const [px, py] of pts.slice(1)) await page.mouse.move(box.x + x + px * size, box.y + y + py * size, { steps: 3 });
+    await page.mouse.up();
+  };
+  // "2" ve "5" elle (şablondan farklı noktalarla).
+  await write([[0, 0.25], [0.15, 0.03], [0.4, 0], [0.55, 0.2], [0.4, 0.5], [0.05, 1], [0.6, 0.97]], 100, 200);
+  await write([[0.55, 0.02], [0.08, 0.04], [0.05, 0.45], [0.35, 0.4], [0.55, 0.62], [0.45, 0.92], [0.05, 0.95]], 128, 200);
+  const ink = page.locator('.cm-page[data-page="0"] .cm-ink path');
+  await expect(ink).toHaveCount(2);
+  await expect(page.locator(".cm-textbox")).toHaveText("25", { timeout: 5_000 });
+  await expect(ink).toHaveCount(0);
+  await page.keyboard.press("Control+z");
+  await expect(page.locator(".cm-textbox")).toHaveCount(0);
+  await expect(ink).toHaveCount(2);
 });

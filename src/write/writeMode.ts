@@ -9,6 +9,7 @@ import {
 } from "./geometry";
 import { PEN_KIND_LABEL, PEN_LABEL, colorClass, colorLabel } from "./layer";
 import { applyFormat } from "./rich";
+import { learn, recognizeLine } from "./hwr";
 import { icon } from "../ui/icons";
 
 /** Metin kutusu yazı boyutları (px, %100 yakınlaştırmada). */
@@ -42,6 +43,7 @@ const SMOOTH: { label: string; lag: number; passes: number }[] = [
 ];
 /** Yazmaya bu kadar ara verilince son satır eğikse düzeltilir. */
 const LEVEL_MS = 1100;
+const CONVERT_MS = 1400;
 /** Seçim çubuğundaki küçült / büyüt adımı. */
 const SCALE_STEP = 1.15;
 const WIDTHS = [1, 2, 4];
@@ -62,7 +64,7 @@ export interface WriteActions {
   remove(id: string): void;
   /** Sayfanın işaret katmanını yeniden çiz (seçim/araç değişince). */
   redraw(page: number): void;
-  pen(p: { color: InkColor; width: number; kind: PenKind; custom: string[]; textSize: number; autoShape: boolean; smooth: number }): void;
+  pen(p: { color: InkColor; width: number; kind: PenKind; custom: string[]; textSize: number; autoShape: boolean; smooth: number; autoText: boolean }): void;
   announce(text: string): void;
   /** Seçili el yazısını metne çevir ya da matematiği çöz (kement eylem çubuğu). */
   handwriting?(marks: Mark[], page: number, mode: "text" | "math"): void;
@@ -88,6 +90,8 @@ export class WriteMode {
   autoShape: boolean;
   /** El yazısı yumuşatma düzeyi: 0 kapalı, 1 hafif, 2 güçlü. */
   smooth: number;
+  /** Ara verince el yazısı satırı daktilo yazısına çevrilir (rakamlar, Türk alfabesi, birkaç işaret). */
+  autoText: boolean;
   /** Ara vermeden yazılan son çizgiler (satır düzeltme için) ve zamanlayıcısı. */
   private burst: { page: number; ids: string[] } | null = null;
   private levelTimer = 0;
@@ -105,12 +109,13 @@ export class WriteMode {
   constructor(
     private viewer: Viewer,
     private fileHash: string,
-    pen: { color: InkColor; width: number; kind?: PenKind; custom?: string[]; textSize?: number; autoShape?: boolean; smooth?: number },
+    pen: { color: InkColor; width: number; kind?: PenKind; custom?: string[]; textSize?: number; autoShape?: boolean; smooth?: number; autoText?: boolean },
     private actions: WriteActions,
   ) {
     this.textSize = pen.textSize ?? 16;
     this.autoShape = pen.autoShape ?? true;
     this.smooth = Math.min(2, Math.max(0, pen.smooth ?? 1));
+    this.autoText = pen.autoText ?? true;
     this.color = pen.color;
     this.width = pen.width;
     this.pen = pen.kind ?? "pen";
@@ -199,7 +204,7 @@ export class WriteMode {
   }
 
   private savePen(): void {
-    this.actions.pen({ color: this.color, width: this.width, kind: this.pen, custom: this.custom, textSize: this.textSize, autoShape: this.autoShape, smooth: this.smooth });
+    this.actions.pen({ color: this.color, width: this.width, kind: this.pen, custom: this.custom, textSize: this.textSize, autoShape: this.autoShape, smooth: this.smooth, autoText: this.autoText });
   }
 
   setColor(c: InkColor): void {
@@ -266,7 +271,13 @@ export class WriteMode {
               }, "cm-tool cm-tool--sub cm-tool--wide cm-tool--smooth");
               b.append(h("span", { class: "cm-tool__level", "aria-hidden": "true" }, ...SMOOTH.slice(1).map((_, i) => h("i", { class: i < this.smooth ? "is-on" : "" }))));
               return b;
-            })())]
+            })(),
+            btn("totext", `Yazıya çevir: ${this.autoText ? "açık" : "kapalı"} (ara verince el yazısı satırı daktilo yazısına döner; Ctrl Z el yazısını geri getirir; yanlış harfi düzeltirsen öğrenir)`, this.autoText, () => {
+              this.autoText = !this.autoText;
+              this.savePen();
+              this.renderPalette();
+              this.actions.announce(`Yazıya çevirme ${this.autoText ? "açık" : "kapalı"}`);
+            }, "cm-tool cm-tool--sub cm-tool--wide"))]
         : this.tool === "eraser"
           ? [sep(), group("Silgi",
               btn("eraser-partial", "Kısmi silgi: yalnızca değdiği yer", this.eraserMode === "partial", () => ((this.eraserMode = "partial"), this.renderPalette()), "cm-tool cm-tool--sub"),
@@ -692,7 +703,7 @@ export class WriteMode {
    * 2,5°–15° eğikse ortasından döndürülüp düzlenir. Yeni satıra (aşağıya) geçince önceki satır hemen değerlendirilir.
    */
   private noteStroke(m: Mark): void {
-    if (!this.autoShape || m.kind !== "ink" || m.pen === "marker") return;
+    if (!(this.autoShape || this.autoText) || m.kind !== "ink" || m.pen === "marker") return;
     const [, my, , mh] = markBox(m);
     if (this.burst && this.burst.page === m.page) {
       const cur = this.burst.ids.map((id) => this.find(id)).filter((x): x is Mark => !!x);
@@ -707,7 +718,8 @@ export class WriteMode {
       this.burst = { page: m.page, ids: [m.id] };
     }
     clearTimeout(this.levelTimer);
-    this.levelTimer = window.setTimeout(() => this.levelBurst(), LEVEL_MS);
+    // Yazıya çevirme açıkken biraz daha beklenir: kelimenin ortasında durup düşünmek çevirmeyi tetiklemesin.
+    this.levelTimer = window.setTimeout(() => this.levelBurst(), this.autoText ? CONVERT_MS : LEVEL_MS);
   }
 
   private levelBurst(): void {
@@ -716,17 +728,70 @@ export class WriteMode {
     this.burst = null;
     if (!b || !this.active) return;
     const pageEl = this.viewer.pageElement(b.page);
-    const marks = b.ids.map((id) => this.find(id)).filter((x): x is Mark => !!x);
-    if (!pageEl || marks.length < 3) return;
+    let marks = b.ids.map((id) => this.find(id)).filter((x): x is Mark => !!x);
+    if (!pageEl || !marks.length) return;
     const w = pageEl.clientWidth;
     const hh = pageEl.clientHeight;
-    const ang = lineTilt(marks, w, hh);
-    if (!ang) return;
-    const [x, y, bw, bh] = unionBox(marks)!;
-    const ops: Op[] = marks.map((m) => ({ before: m, after: { ...rotateAround(m, x + bw / 2, y + bh / 2, -ang, w, hh), updatedAt: Date.now() } }));
-    ops.forEach((op) => "after" in op && this.actions.update(op.after));
+    const ang = this.autoShape && marks.length >= 3 ? lineTilt(marks, w, hh) : 0;
+    if (ang) {
+      const [x, y, bw, bh] = unionBox(marks)!;
+      const ops: Op[] = marks.map((m) => ({ before: m, after: { ...rotateAround(m, x + bw / 2, y + bh / 2, -ang, w, hh), updatedAt: Date.now() } }));
+      ops.forEach((op) => "after" in op && this.actions.update(op.after));
+      this.record(ops);
+      marks = ops.map((op) => ("after" in op ? op.after : marks[0]));
+      if (!this.autoText) this.actions.announce("Yazı satırı düzeltildi; Ctrl Z geri alır");
+    }
+    if (this.autoText) this.convertLine(marks, b.page, w, hh);
+  }
+
+  /**
+   * El yazısı satırını daktilo yazısına çevir. Aynı satırda az önce çevrilmiş yazının hemen sağına yazıldıysa
+   * ona eklenir (kelime ortasında durulsa da tek kutu). Tanınmayan çizim olduğu gibi kalır.
+   */
+  private convertLine(marks: Mark[], page: number, w: number, hh: number): void {
+    const ink = marks.filter((m): m is Extract<Mark, { kind: "ink" }> => m.kind === "ink" && !m.straight);
+    if (!ink.length || ink.length !== marks.length) return;
+    const res = recognizeLine(ink.map((m) => m.points), w, hh);
+    if (!res) return;
+    const z = this.viewer.scale || 1;
+    const [bx, by, bw, bh] = res.box;
+    const cap = res.capPx / hh;
+    const cy = by + bh / 2;
+    const glyphs = res.glyphs.filter((g) => g.ch.trim());
+    const prev = this.actions.marks().find((m): m is Extract<Mark, { kind: "text" }> =>
+      m.kind === "text" && m.page === page && !!m.hw && Math.abs(m.hw.cy - cy) < Math.max(m.hw.cap, cap) * 0.5 &&
+      bx - m.hw.right > -0.005 && (bx - m.hw.right) * w < res.capPx * 2.5);
+    const now = Date.now();
+    const ops: Op[] = ink.map((m) => ({ remove: m }));
+    ink.forEach((m) => this.actions.remove(m.id));
+    let shown: string;
+    if (prev) {
+      const space = (bx - prev.hw!.right) * w > res.capPx * 0.45 ? " " : "";
+      const text = `${prev.text}${space}${res.text}`;
+      const right = Math.max(prev.hw!.right, bx + bw);
+      const after: Mark = {
+        ...prev, text, updatedAt: now,
+        box: [prev.box[0], prev.box[1], Math.max(prev.box[2], right - prev.box[0] + (bw / Math.max(1, res.text.length)) * 2), prev.box[3]],
+        hw: { glyphs: [...prev.hw!.glyphs, ...glyphs], right, cy: prev.hw!.cy, cap: prev.hw!.cap },
+      };
+      this.actions.update(after);
+      ops.push({ before: prev, after });
+      shown = text;
+    } else {
+      // Yazı boyutu el yazısının büyük harf yüksekliğine göre; kutu el yazısının yerine oturur.
+      const size = Math.max(10, Math.min(64, Math.round(res.capPx / z / 0.72)));
+      const m: Mark = {
+        id: uid(), fileHash: this.fileHash, page, kind: "text", color: ink[0].color, text: res.text, size,
+        box: [Math.max(0, bx - (6 * z) / w), Math.max(0, by - ((4 + size * 0.22) * z) / hh), Math.min(1 - bx, Math.max(0.08, bw * 1.3 + (24 * z) / w)), 0.03],
+        hw: { glyphs, right: bx + bw, cy, cap },
+        createdAt: now, updatedAt: now,
+      };
+      this.actions.add(m);
+      ops.push({ add: m });
+      shown = res.text;
+    }
     this.record(ops);
-    this.actions.announce("Yazı satırı düzeltildi; Ctrl Z geri alır");
+    this.actions.announce(`Yazıya çevrildi: ${shown}. Ctrl Z el yazısını geri getirir`);
   }
 
   private drawShape(e: PointerEvent, at: NonNullable<ReturnType<WriteMode["pageAt"]>>): void {
@@ -1185,7 +1250,24 @@ export class WriteMode {
         return;
       }
       const size = before.kind === "text" && host!.style.getPropertyValue("--fs") ? parseFloat(host!.style.getPropertyValue("--fs")) : undefined;
-      const after = { ...before, text, ...(size ? { size } : {}), box: [cur[0], cur[1], cur[2], hgt], updatedAt: Date.now() } as Mark;
+      // El yazısından çevrilmiş kutuda düzeltilen harfler öğrenilir (harf sayısı aynıysa).
+      let hw = before.kind === "text" ? before.hw : undefined;
+      if (hw && before.kind === "text" && text !== before.text) {
+        const oldCh = [...before.text.replace(/\s+/g, "")];
+        const newCh = [...text.replace(/\s+/g, "")];
+        if (oldCh.length === hw.glyphs.length && newCh.length === oldCh.length) {
+          let taught = 0;
+          newCh.forEach((c, i) => {
+            if (c !== oldCh[i]) {
+              learn(c, hw!.glyphs[i].strokes);
+              taught++;
+            }
+          });
+          hw = { ...hw, glyphs: hw.glyphs.map((g, i) => ({ ...g, ch: newCh[i] })) };
+          if (taught) this.actions.announce(`${taught} harf öğrenildi; bir dahakine daha iyi tanınır`);
+        } else hw = undefined;
+      }
+      const after = { ...before, text, ...(size ? { size } : {}), ...(before.kind === "text" ? { hw } : {}), box: [cur[0], cur[1], cur[2], hgt], updatedAt: Date.now() } as Mark;
       this.actions.update(after);
       this.record([isNew ? { add: after } : { before, after }]);
     };
