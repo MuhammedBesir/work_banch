@@ -114,7 +114,7 @@ Tasarım kararları, renk/şekil sözleşmesi, etkileşim kuralları ve riskler 
 - **İşaretler paneli** türe göre filtreler (Vurgu / Yazı / Çizim). Kalem çizimleri sayfa başına tek satırdır; el yazısı aranamaz, panel bunu açıkça yazar.
 - Metin kutuları ve notlar **Markdown dışa aktarmaya** girer (isteğe bağlı); tüm işaretler **JSON yedeğe** girer ve **Düzenle modunda** kaydedilen kopyaya sayfalarıyla (döndürmeyle birlikte) taşınır.
 
-### Samsung Notes'tan esinlenen not araçları
+### Not araçları
 
 - **Kalem türleri:** tükenmez, kurşun kalem, fosforlu (yarı saydam), dolma kalem (açılı uç, yöne göre kalınlık). Üç hazır renk + 12 özel ton ve renk seçici; son kullanılan özel renkler palette kalır.
 - **Kısmi silgi** (çizginin değdiği kısmı siler) ya da **bütün çizgi**. Kalemin yan tuşu ya da silgi ucu basılıyken geçici silgi.

@@ -15,5 +15,5 @@ export function inkRgb(c: InkColor): [number, number, number] {
 /** Ekranda: hazır renkler tema değişkeninden (koyu temada açılır), özel renk olduğu gibi. */
 export const inkCss = (c: InkColor) => (isCustom(c) ? c : `var(--pen-${c})`);
 
-/** Özel renk seçiminde önerilenler (Samsung Notes'taki palete benzer, okunur tonlar). */
+/** Özel renk seçiminde önerilenler (okunur tonlar). */
 export const SWATCHES = ["#1f1d1a", "#5b5b5b", "#1f4e79", "#2f7ed8", "#0f7b6c", "#3d8b37", "#b8860b", "#d9730d", "#a3221a", "#c2185b", "#6a3ea1", "#8d6e63"];

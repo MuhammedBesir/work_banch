@@ -413,7 +413,7 @@ export function recognizedSize(r: Recognized, w: number, h: number): number {
 }
 
 /**
- * Elle çizilen şekli tanı (Samsung Notes'taki "çiz ve bekle"): düz çizgi, üçgen, dörtgen, dikdörtgen, elips.
+ * Elle çizilen şekli tanı ("çiz ve bekle"): düz çizgi, üçgen, dörtgen, dikdörtgen, elips.
  * Noktalar 0–1, `w`, `h` sayfanın piksel boyutu. Tanınmazsa `null`.
  */
 export function recognizeShape(points: Pt[], w: number, h: number): Recognized | null {
