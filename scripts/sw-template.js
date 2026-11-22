@@ -30,6 +30,20 @@ self.addEventListener("fetch", (e) => {
     e.respondWith(fetch(req).catch(() => caches.match("./index.html", { ignoreSearch: true }).then((r) => r || caches.match("./"))));
     return;
   }
+  const immutable = url.pathname.includes("/assets/") || url.pathname.includes("/ocr/");
+  if (!immutable) {
+    // Adı sabit dosyalar (manifest, logolar): önce ağ. Yoksa uygulama adı ve simgesi eski sürümde takılı kalır.
+    e.respondWith(
+      fetch(req).then((res) => {
+        if (res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(req, copy));
+        }
+        return res;
+      }).catch(() => caches.match(req, { ignoreSearch: true }).then((r) => r || Response.error())),
+    );
+    return;
+  }
   // Adları içerik özetli dosyalar ve OCR verisi değişmez: önce önbellek; ilk kez gerekenler kullanılınca saklanır.
   e.respondWith(
     caches.match(req).then((hit) => hit || fetch(req).then((res) => {
