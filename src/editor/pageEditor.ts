@@ -33,6 +33,7 @@ export class PageEditor {
   private grid: HTMLElement;
   private main: HTMLElement;
   private selInfo: HTMLElement;
+  private clearBtn: HTMLButtonElement;
   private changesEl: HTMLElement;
   private warnEl: HTMLElement;
   private undoBtn: HTMLButtonElement;
@@ -52,8 +53,8 @@ export class PageEditor {
     this.sources.set(main.id, main);
     this.pages = Array.from({ length: main.doc.numPages }, (_, i) => ({ key: newKey(), src: main.id, index: i, rotation: 0 }));
 
-    this.selInfo = h("b", { style: "font-weight:600" });
-    const addBtn = h("button", { class: "cm-btn cm-btn--sm", "aria-haspopup": "menu" }, "Sayfa ekle ▾");
+    this.selInfo = h("b", { class: "cm-actionbar__info", "aria-live": "polite" });
+    const addBtn = h("button", { class: "cm-btn cm-btn--sm cm-btn--withicon", "aria-haspopup": "menu" }, "Sayfa ekle", icon("chev"));
     addBtn.addEventListener("click", () => openMenu(addBtn, [
       { label: "Boş sayfa", run: () => this.insertBlank("blank") },
       { label: "Çizgili not sayfası", run: () => this.insertBlank("lined") },
@@ -69,14 +70,20 @@ export class PageEditor {
     // Simgeli düğmeler; kısayol ipucunda (araç çubuğu kısayol kutucuklarıyla kalabalıklaşmasın).
     const action = (name: string, label: string, key: string | null, run: () => void, danger = false) =>
       h("button", { class: `cm-btn cm-btn--ghost cm-btn--sm cm-btn--withicon${danger ? " cm-btn--danger" : ""}`, title: key ? `${label} (${key})` : label, onclick: run }, icon(name), label);
-    const bar = h("div", { class: "cm-actionbar", role: "toolbar", "aria-label": "Sayfa işlemleri" },
-      this.selInfo, h("span", { class: "cm-bar__sep" }),
+    this.clearBtn = h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm cm-actionbar__clear", hidden: true, onclick: () => {
+      this.selected.clear();
+      this.render();
+    } }, "Seçimi kaldır");
+    // Sayfa seçilince şerit mavi zemine geçer: işlemlerin hangi sayfalara uygulanacağı görünür.
+    const bar = h("div", { class: "cm-actionbar cm-editor__bar", role: "toolbar", "aria-label": "Sayfa işlemleri" },
+      this.selInfo,
       action("rotate", "Döndür", "R", () => this.rotate()),
       action("crop", "Kırp", "K", () => this.openCrop()),
       marginBtn,
       action("copy", "Çoğalt", "Ctrl D", () => this.duplicate()),
       action("trash", "Sil", "Del", () => this.remove(), true),
       action("split", "Ayrı PDF", null, () => void this.save(true)),
+      this.clearBtn,
       h("span", { class: "cm-bar__spacer" }),
       addBtn,
       h("button", { class: "cm-btn cm-btn--sm cm-btn--withicon", onclick: () => this.pickOther() }, icon("merge"), "Başka PDF ekle"),
@@ -86,8 +93,8 @@ export class PageEditor {
     this.main = h("main", { class: "cm-editor__main", "aria-label": "Sayfalar" }, this.grid);
     this.changesEl = h("span", { class: "cm-muted" });
     this.undoBtn = h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm", onclick: () => this.undo() }, "Geri al ", kbd("Ctrl Z"));
-    this.warnEl = h("span", { class: "cm-muted", style: "font-size:12px;line-height:16px" });
-    const foot = h("footer", { class: "cm-actionbar", style: "border-top:1px solid var(--line-strong);border-bottom:0;flex-wrap:wrap" },
+    this.warnEl = h("span", { class: "cm-editor__warn" });
+    const foot = h("footer", { class: "cm-actionbar cm-editor__foot" },
       h("span", { class: "cm-trust", text: "Değişiklikler yeni bir kopyaya yazılır; orijinal dosyan olduğu gibi kalır." }),
       this.warnEl,
       h("span", { class: "cm-bar__spacer" }),
@@ -179,6 +186,8 @@ export class PageEditor {
   private updateBars(): void {
     const n = this.selected.size;
     this.selInfo.textContent = n ? `${num(n)} sayfa seçili` : `${num(this.pages.length)} sayfa`;
+    this.selInfo.parentElement?.classList.toggle("has-selection", n > 0);
+    this.clearBtn.hidden = n === 0;
     this.changesEl.textContent = this.history.length ? `${num(this.history.length)} değişiklik ·` : "Değişiklik yok";
     this.actions.changed?.(this.history.length);
     this.undoBtn.disabled = !this.history.length;

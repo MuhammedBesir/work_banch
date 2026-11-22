@@ -1,4 +1,4 @@
-// Çalışma Masası — çevrimdışı çalışma. Derlemede üretilir (vite.config.ts → sw eklentisi).
+// Defter — çevrimdışı çalışma. Derlemede üretilir (vite.config.ts → sw eklentisi).
 // Yalnızca kendi dosyalarımızı önbelleğe alır; AI ve model indirme istekleri (başka alan adları) hiç ele alınmaz.
 const VERSION = "__VERSION__";
 const PRECACHE = __PRECACHE__;

@@ -9,14 +9,11 @@ import {
 } from "./geometry";
 import { PEN_KIND_LABEL, PEN_LABEL, colorClass, colorLabel } from "./layer";
 import { applyFormat } from "./rich";
-import { learn, recognizeLine, type HwLine } from "./hwr";
 import { icon } from "../ui/icons";
 
 /** Metin kutusu yazı boyutları (px, %100 yakınlaştırmada). */
 const TEXT_SIZES: [number, string][] = [[12, "küçük"], [16, "orta"], [22, "büyük"], [30, "başlık"]];
 
-export type TextMode = "suggest" | "auto" | "off";
-const TEXT_MODE_LABEL: Record<TextMode, string> = { suggest: "öneri", auto: "otomatik", off: "kapalı" };
 
 export type Tool = "select" | "lasso" | "highlight" | "pen" | "text" | "sticky" | "shape" | "image" | "eraser";
 
@@ -46,7 +43,6 @@ const SMOOTH: { label: string; lag: number; passes: number }[] = [
 ];
 /** Yazmaya bu kadar ara verilince son satır eğikse düzeltilir. */
 const LEVEL_MS = 1100;
-const CONVERT_MS = 1400;
 /** Seçim çubuğundaki küçült / büyüt adımı. */
 const SCALE_STEP = 1.15;
 const WIDTHS = [1, 2, 4];
@@ -64,12 +60,10 @@ export interface WriteActions {
   update(m: Mark): void;
   /** Katmanı yeniden çizmeden yalnızca kaydet (yazarken otomatik kayıt). */
   persist?(m: Mark): void;
-  /** "El yazını öğret" penceresi. */
-  teach?(): void;
   remove(id: string): void;
   /** Sayfanın işaret katmanını yeniden çiz (seçim/araç değişince). */
   redraw(page: number): void;
-  pen(p: { color: InkColor; width: number; kind: PenKind; custom: string[]; textSize: number; autoShape: boolean; smooth: number; autoText: boolean; textMode: TextMode }): void;
+  pen(p: { color: InkColor; width: number; kind: PenKind; custom: string[]; textSize: number; autoShape: boolean; smooth: number }): void;
   announce(text: string): void;
   /** Seçili el yazısını metne çevir ya da matematiği çöz (kement eylem çubuğu). */
   handwriting?(marks: Mark[], page: number, mode: "text" | "math"): void;
@@ -95,23 +89,16 @@ export class WriteMode {
   autoShape: boolean;
   /** El yazısı yumuşatma düzeyi: 0 kapalı, 1 hafif, 2 güçlü. */
   smooth: number;
-  /**
-   * El yazısını yazıya çevirme: "suggest" ara verince altında düzenlenebilir öneri çıkar (Enter çevirir, düzeltilen
-   * harf öğrenilir), "auto" emin olunca kendiliğinden çevirir, "off" kapalı.
-   */
-  textMode: TextMode;
-  get autoText(): boolean {
-    return this.textMode !== "off";
-  }
-  /** Açık öneri: hangi el yazısı çizgileri için, kutusu. */
-  private suggestion: { page: number; ids: string[]; el: HTMLElement } | null = null;
-  /** Şekle düzeltilen ama yazının parçası olabilecek çizgilerin ham hâli (yazıya çevirirken kullanılır). */
+  /** Şekle düzeltilen çizgilerin ham hâli: satır düzeltmede yazının parçası sayılır, tek başına şekil yazı değildir. */
   private rawOf = new Map<string, Extract<Mark, { kind: "ink" }>>();
   /** Ara vermeden yazılan son çizgiler (satır düzeltme için) ve zamanlayıcısı. */
   private burst: { page: number; ids: string[] } | null = null;
   private levelTimer = 0;
   private custom: string[];
   private colorsOpen = false;
+  /** Kalem ayarları penceresi (paletin yanında): kalem türü ve yazma yardımları, yazılı seçeneklerle. */
+  readonly sheet: HTMLElement;
+  private sheetOpen = false;
   /** Seçili işaretler (`Shift` + tıklama ile çoklu seçim). */
   readonly selected = new Set<string>();
   editingId: string | null = null;
@@ -124,19 +111,30 @@ export class WriteMode {
   constructor(
     private viewer: Viewer,
     private fileHash: string,
-    pen: { color: InkColor; width: number; kind?: PenKind; custom?: string[]; textSize?: number; autoShape?: boolean; smooth?: number; autoText?: boolean; textMode?: TextMode },
+    pen: { color: InkColor; width: number; kind?: PenKind; custom?: string[]; textSize?: number; autoShape?: boolean; smooth?: number },
     private actions: WriteActions,
   ) {
     this.textSize = pen.textSize ?? 16;
     this.autoShape = pen.autoShape ?? true;
     this.smooth = Math.min(2, Math.max(0, pen.smooth ?? 1));
-    this.textMode = pen.textMode ?? (pen.autoText === false ? "off" : "suggest");
     this.color = pen.color;
     this.width = pen.width;
     this.pen = pen.kind ?? "pen";
     this.custom = pen.custom ?? [];
     this.el = h("div", { class: "cm-palette", role: "toolbar", "aria-label": "Yazma araçları", "aria-orientation": "vertical" });
     this.el.addEventListener("pointerdown", (e) => e.stopPropagation());
+    this.sheet = h("section", { class: "cm-pensheet", "aria-label": "Kalem ayarları", hidden: true });
+    this.sheet.addEventListener("pointerdown", (e) => e.stopPropagation());
+    this.sheet.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        this.toggleSheet(false);
+      }
+    });
+    // Pencere dışına (sayfaya) basınca kapanır: yazmaya başlamak onu kapatır.
+    document.addEventListener("pointerdown", (e) => {
+      if (this.sheetOpen && !this.sheet.contains(e.target as Node) && !this.el.contains(e.target as Node)) this.toggleSheet(false);
+    }, true);
     // Yazarken palete basmak (boyut, renk) imleci metin kutusundan almasın.
     this.el.addEventListener("mousedown", (e) => {
       if (this.editingId && (e.target as HTMLElement).closest("button")) e.preventDefault();
@@ -173,10 +171,9 @@ export class WriteMode {
 
   disable(): void {
     this.finishEditing();
-    // Yaz modundan çıkınca bekleyen satır düzeltmesi ve öneri kalkar.
+    // Yaz modundan çıkınca bekleyen satır düzeltmesi kalkar.
     clearTimeout(this.levelTimer);
     this.burst = null;
-    this.closeSuggestion();
     this.active = false;
     this.selected.clear();
     this.paintSelection();
@@ -202,8 +199,16 @@ export class WriteMode {
     void this.placeImage(file, this.viewer.current, 0.3, 0.3);
   };
 
+  /** Kalem ayarları penceresini aç/kapat. */
+  toggleSheet(open = !this.sheetOpen): void {
+    this.sheetOpen = open;
+    this.renderPalette();
+    if (open) (this.sheet.querySelector("button[aria-pressed=true]") as HTMLElement | null)?.focus();
+  }
+
   setTool(t: Tool): void {
     this.finishEditing();
+    if (t !== "pen") this.sheetOpen = false;
     this.tool = t;
     this.select(null);
     this.renderPalette();
@@ -220,7 +225,7 @@ export class WriteMode {
   }
 
   private savePen(): void {
-    this.actions.pen({ color: this.color, width: this.width, kind: this.pen, custom: this.custom, textSize: this.textSize, autoShape: this.autoShape, smooth: this.smooth, autoText: this.autoText, textMode: this.textMode });
+    this.actions.pen({ color: this.color, width: this.width, kind: this.pen, custom: this.custom, textSize: this.textSize, autoShape: this.autoShape, smooth: this.smooth });
   }
 
   setColor(c: InkColor): void {
@@ -271,31 +276,13 @@ export class WriteMode {
     const subs = this.tool === "shape"
       ? [sep(), group("Şekil", ...SHAPES.map(([s, label]) => btn(`shape-${s}`, label, this.shape === s, () => ((this.shape = s), this.renderPalette()), "cm-tool cm-tool--sub")))]
       : this.tool === "pen"
-        ? [sep(), group("Kalem türü", ...PEN_KINDS.map((k) => btn(`pen-${k}`, PEN_KIND_LABEL[k], this.pen === k, () => this.setPen(k), "cm-tool cm-tool--sub")),
-            btn("autoshape", `Otomatik düzeltme: ${this.autoShape ? "açık" : "kapalı"} (şekiller kalem kalkınca, eğik yazı satırı ara verince düzelir; Ctrl Z geri alır)`, this.autoShape, () => {
-              this.autoShape = !this.autoShape;
-              this.savePen();
-              this.renderPalette();
-              this.actions.announce(`Otomatik düzeltme ${this.autoShape ? "açık" : "kapalı"}`);
-            }, "cm-tool cm-tool--sub cm-tool--wide"),
+        ? [sep(), group("Kalem türü", ...PEN_KINDS.map((k) => btn(`pen-${k}`, PEN_KIND_LABEL[k], this.pen === k, () => this.setPen(k), "cm-tool cm-tool--sub"))),
             (() => {
-              const b = btn("smooth", `Yazı yumuşatma: ${SMOOTH[this.smooth].label} (titremeyi süzer; değiştirmek için bas)`, this.smooth > 0, () => {
-                this.smooth = (this.smooth + 1) % SMOOTH.length;
-                this.savePen();
-                this.renderPalette();
-                this.actions.announce(`Yazı yumuşatma ${SMOOTH[this.smooth].label}`);
-              }, "cm-tool cm-tool--sub cm-tool--wide cm-tool--smooth");
-              b.append(h("span", { class: "cm-tool__level", "aria-hidden": "true" }, ...SMOOTH.slice(1).map((_, i) => h("i", { class: i < this.smooth ? "is-on" : "" }))));
+              const b = btn("sliders", "Kalem ayarları: şekil düzeltme, yazı yumuşatma", this.sheetOpen, () => this.toggleSheet(), "cm-tool cm-tool--sub cm-tool--wide cm-tool--sheet");
+              b.setAttribute("aria-expanded", String(this.sheetOpen));
+              b.append(h("span", { class: "cm-tool__text", text: "Ayarlar" }));
               return b;
-            })(),
-            btn("totext", `Yazıya çevir: ${TEXT_MODE_LABEL[this.textMode]} (öneri: ara verince altında düzenlenebilir öneri, Enter çevirir; otomatik: emin olunca kendiliğinden; değiştirmek için bas)`, this.textMode !== "off", () => {
-              const order: TextMode[] = ["suggest", "auto", "off"];
-              this.textMode = order[(order.indexOf(this.textMode) + 1) % order.length];
-              this.savePen();
-              this.renderPalette();
-              this.actions.announce(`Yazıya çevirme: ${TEXT_MODE_LABEL[this.textMode]}`);
-            }, "cm-tool cm-tool--sub cm-tool--wide"),
-            btn("teach", "El yazını öğret: her harfi bir iki kez yaz, tanıma senin yazına uysun", false, () => this.actions.teach?.(), "cm-tool cm-tool--sub cm-tool--wide"))]
+            })()]
         : this.tool === "eraser"
           ? [sep(), group("Silgi",
               btn("eraser-partial", "Kısmi silgi: yalnızca değdiği yer", this.eraserMode === "partial", () => ((this.eraserMode = "partial"), this.renderPalette()), "cm-tool cm-tool--sub"),
@@ -317,6 +304,7 @@ export class WriteMode {
           h("label", { class: "cm-colorpick__more", title: "Başka renk" }, "+", picker))
       : null;
     const custom = this.custom.filter((c) => !PEN_COLORS.includes(c as never)).slice(0, 3);
+    this.renderSheet();
     this.el.replaceChildren(
       h("div", { class: "cm-palette__grid", role: "group", "aria-label": "Araçlar" }, ...TOOLS.map(tool)),
       ...subs,
@@ -338,6 +326,47 @@ export class WriteMode {
         h("button", { class: "cm-tool", "aria-label": "Geri al (Ctrl Z)", title: "Geri al (Ctrl Z)", disabled: !this.undoStack.length, onclick: () => this.undo() }, icon("undo")),
         h("button", { class: "cm-tool", "aria-label": "Yinele (Ctrl Shift Z)", title: "Yinele (Ctrl Shift Z)", disabled: !this.redoStack.length, onclick: () => this.redo() }, icon("redo")),
       ),
+    );
+  }
+
+  /**
+   * Kalem ayarları: her seçenek yazıyla. Ayarın adı ve değeri düğmenin adında ("Yazı yumuşatma: hafif"),
+   * böylece ekran okuyucu ve ipucu ne seçili olduğunu söyler.
+   */
+  private renderSheet(): void {
+    const open = this.sheetOpen && this.tool === "pen";
+    this.sheet.hidden = !open;
+    if (!open) return;
+    if (this.el.parentElement && this.sheet.parentElement !== this.el.parentElement) this.el.after(this.sheet);
+    this.sheet.style.setProperty("--pw", `${this.el.offsetWidth || 104}px`);
+    // Yeniden çizimde odak aynı düğmede kalsın (klavyeyle gezinirken kaybolmasın).
+    const focused = this.sheet.contains(document.activeElement) ? (document.activeElement as HTMLElement).getAttribute("aria-label") : null;
+    queueMicrotask(() => {
+      if (focused) this.sheet.querySelector<HTMLElement>(`[aria-label="${CSS.escape(focused)}"]`)?.focus();
+    });
+    const seg = <T,>(name: string, options: [T, string][], cur: T, set: (v: T) => void) =>
+      h("div", { class: "cm-seg cm-pensheet__seg", role: "group", "aria-label": name },
+        ...options.map(([v, label]) => h("button", {
+          class: v === cur ? "is-on" : "", "aria-pressed": String(v === cur), "aria-label": `${name}: ${label}`, title: `${name}: ${label}`,
+          onclick: () => {
+            set(v);
+            this.savePen();
+            this.renderPalette();
+            this.actions.announce(`${name}: ${label}`);
+          },
+        }, label[0].toLocaleUpperCase("tr") + label.slice(1))));
+    const row = (name: string, hint: string, control: HTMLElement) =>
+      h("div", { class: "cm-pensheet__row" }, h("div", { class: "cm-pensheet__label" }, h("span", { text: name }), h("small", { class: "cm-muted", text: hint })), control);
+    this.sheet.replaceChildren(
+      h("div", { class: "cm-pensheet__head" }, h("span", { text: "Kalem" }),
+        h("button", { class: "cm-pensheet__close", "aria-label": "Kalem ayarlarını kapat (Esc)", title: "Kapat (Esc)", onclick: () => this.toggleSheet(false) }, icon("close"))),
+      h("div", { class: "cm-pensheet__pens", role: "group", "aria-label": "Kalem türü" },
+        ...PEN_KINDS.map((k) => h("button", {
+          class: `cm-pensheet__pen${this.pen === k ? " is-on" : ""}`, "aria-pressed": String(this.pen === k), onclick: () => this.setPen(k),
+        }, icon(`pen-${k}`), h("span", { text: PEN_KIND_LABEL[k] })))),
+      h("p", { class: "cm-label cm-pensheet__sect", text: "Yardım" }),
+      row("Otomatik düzeltme", "Şekil ve eğik satır, kalem kalkınca", seg("Otomatik düzeltme", [[true, "açık"], [false, "kapalı"]], this.autoShape, (v) => (this.autoShape = v))),
+      row("Yazı yumuşatma", "Titremeyi süzer", seg("Yazı yumuşatma", SMOOTH.map((x, i) => [i, x.label] as [number, string]), this.smooth, (v) => (this.smooth = v))),
     );
   }
 
@@ -385,6 +414,8 @@ export class WriteMode {
     if (ctrl && e.key.toLowerCase() === "y") return this.redo(), true;
     if (ctrl || e.altKey || isTyping(e)) return false;
     if (e.shiftKey && /^Digit[1-3]$/.test(e.code)) return this.setColor(PEN_COLORS[Number(e.code.slice(5)) - 1]), true;
+    // Esc önce açık kalem ayarlarını kapatır (Yaz modundan çıkmadan).
+    if (e.key === "Escape" && this.sheetOpen) return this.toggleSheet(false), true;
     if (e.key === "Escape" && this.selected.size) return this.select(null), true;
     if ((e.key === "Delete" || e.key === "Backspace") && this.selected.size) {
       const list = [...this.selected].map((id) => this.find(id)).filter((m): m is Mark => !!m);
@@ -688,9 +719,8 @@ export class WriteMode {
       };
       let r = shaped as Recognized | null;
       // Otomatik düzeltme: kalem kalkınca, yeterince büyük ve net şekillerde. Fosforluda yalnızca düz çizgi.
-      // Yazının ortasındaysa (az önceki çizgilerin yanında) harf sayılır, şekle çevrilmez: o, l, 1, − yenmesin.
       let auto = false;
-      if (!r && this.autoShape && !this.nearBurst(raw)) {
+      if (!r && this.autoShape) {
         const cand = recognizeShape(rawPts, at.w, at.h);
         if (cand && (pen !== "marker" || cand.type === "line") && recognizedSize(cand, at.w, at.h) >= (cand.type === "line" ? AUTO_MIN_LINE : AUTO_MIN_SHAPE)) {
           r = cand;
@@ -713,7 +743,7 @@ export class WriteMode {
         this.record([{ add: raw }]);
         this.record([{ remove: raw }, { add: m }]);
         this.actions.announce("Şekil düzeltildi; Ctrl Z ham çizime döner");
-        // Bir kelimenin ilk harfi olabilir (büyük o, l): ham hâli yazıya çevirmede kullanılır.
+        // Bir yazının ilk harfi olabilir (büyük o, l): satır düzeltmede yazıyla birlikte döner.
         if (raw.kind === "ink") {
           this.rawOf.set(m.id, raw);
           this.noteStroke(m);
@@ -726,20 +756,8 @@ export class WriteMode {
    * Satır düzeltme: ara vermeden yazılan çizgiler bir "satır" sayılır; LEVEL_MS ara verilince satır
    * 2,5°–15° eğikse ortasından döndürülüp düzlenir. Yeni satıra (aşağıya) geçince önceki satır hemen değerlendirilir.
    */
-  /** Çizgi, süren yazının (açık satır) yakınında mı: aynı satır bandında ve yatayda birkaç harf mesafesinde. */
-  private nearBurst(m: Mark): boolean {
-    if (!this.autoText || !this.burst || this.burst.page !== m.page) return false;
-    const cur = this.burst.ids.map((id) => this.find(id)).filter((x): x is Mark => !!x);
-    const box = cur.length ? unionBox(cur) : null;
-    if (!box) return false;
-    const [x, y, w, hh] = markBox(m);
-    const vOverlap = Math.min(y + hh, box[1] + box[3]) - Math.max(y, box[1]);
-    const unitH = Math.max(box[3], 0.01);
-    return vOverlap > -unitH * 0.3 && x < box[0] + box[2] + unitH * 2 && x + w > box[0] - unitH * 2;
-  }
-
   private noteStroke(m: Mark): void {
-    if (!(this.autoShape || this.autoText) || (m.kind !== "ink" && !this.rawOf.has(m.id)) || (m.kind === "ink" && m.pen === "marker")) return;
+    if (!this.autoShape || (m.kind !== "ink" && !this.rawOf.has(m.id)) || (m.kind === "ink" && m.pen === "marker")) return;
     const [, my, , mh] = markBox(m);
     if (this.burst && this.burst.page === m.page) {
       const cur = this.burst.ids.map((id) => this.find(id)).filter((x): x is Mark => !!x);
@@ -754,8 +772,7 @@ export class WriteMode {
       this.burst = { page: m.page, ids: [m.id] };
     }
     clearTimeout(this.levelTimer);
-    // Yazıya çevirme açıkken biraz daha beklenir: kelimenin ortasında durup düşünmek çevirmeyi tetiklemesin.
-    this.levelTimer = window.setTimeout(() => this.levelBurst(), this.autoText ? CONVERT_MS : LEVEL_MS);
+    this.levelTimer = window.setTimeout(() => this.levelBurst(), LEVEL_MS);
   }
 
   private levelBurst(): void {
@@ -781,136 +798,9 @@ export class WriteMode {
       ops.forEach((op) => "after" in op && this.actions.update(op.after));
       this.record(ops);
       marks = ops.map((op) => ("after" in op ? op.after : marks[0]));
-      if (!this.autoText) this.actions.announce("Yazı satırı düzeltildi; Ctrl Z geri alır");
+      this.actions.announce("Yazı satırı düzeltildi; Ctrl Z geri alır");
     }
-    if (this.autoText) this.convertLine(marks, b.page, w, hh);
   }
-
-  private closeSuggestion(): void {
-    this.suggestion?.el.remove();
-    this.suggestion = null;
-  }
-
-  /**
-   * El yazısı satırını daktilo yazısına çevir. Aynı satırda az önce çevrilmiş yazının hemen sağına yazıldıysa
-   * ona eklenir (kelime ortasında durulsa da tek kutu). Tanınmayan çizim olduğu gibi kalır.
-   */
-  private convertLine(marks: Mark[], page: number, w: number, hh: number): void {
-    // Aynı satırda açık bir öneri varsa yeni yazı ona eklenir (kelimenin ortasında durulsa da tek öneri).
-    const sug = this.suggestion;
-    if (sug && sug.page === page) {
-      const prev = sug.ids.map((id) => this.find(id)).filter((x): x is Mark => !!x);
-      const pb = prev.length ? unionBox(prev) : null;
-      const nb = unionBox(marks)!;
-      if (pb && Math.min(pb[1] + pb[3], nb[1] + nb[3]) - Math.max(pb[1], nb[1]) > -pb[3] * 0.3 && nb[0] < pb[0] + pb[2] + pb[3] * 3) {
-        marks = [...prev, ...marks.filter((m) => !sug.ids.includes(m.id))];
-      }
-    }
-    this.closeSuggestion();
-    const usable = marks.filter((m) => (m.kind === "ink" && !m.straight) || this.rawOf.has(m.id));
-    if (!usable.length || usable.length !== marks.length) return;
-    const pointsOf = (m: Mark) => (this.rawOf.get(m.id) ?? (m as Extract<Mark, { kind: "ink" }>)).points;
-    const res = recognizeLine(usable.map(pointsOf), w, hh);
-    if (!res) return;
-    if (this.textMode === "auto" && res.confident) return this.applyText(usable, res, page, w, hh, res.text);
-    this.showSuggestion(usable, res, page, w, hh);
-  }
-
-  /** Öneri kutusu: el yazısının altında, düzenlenebilir metin; Enter / ✓ çevirir, Esc / ✕ el yazısını bırakır. */
-  private showSuggestion(marks: Mark[], res: HwLine, page: number, w: number, hh: number): void {
-    const pageEl = this.viewer.pageElement(page);
-    if (!pageEl) return;
-    const input = h("input", { class: "cm-hwsug__input", value: res.text, "aria-label": "Tanınan yazı; düzeltip Enter'a bas", spellcheck: "false", size: Math.max(4, [...res.text].length + 2) });
-    const accept = () => {
-      const text = input.value.replace(/\s+/g, " ").trim();
-      this.closeSuggestion();
-      if (!text) return;
-      // Düzeltilen harfleri öğren: harf sayısı tutuyorsa her değişen harf kullanıcı şablonu olur.
-      const oldCh = [...res.text.replace(/\s+/g, "")];
-      const newCh = [...text.replace(/\s+/g, "")];
-      const glyphs = res.glyphs.filter((g) => g.ch.trim());
-      let taught = 0;
-      if (newCh.length === glyphs.length && oldCh.length === glyphs.length) {
-        newCh.forEach((c, i) => {
-          if (c !== oldCh[i]) {
-            learn(c, glyphs[i].strokes);
-            glyphs[i] = { ...glyphs[i], ch: c };
-            taught++;
-          }
-        });
-      }
-      this.applyText(marks, { ...res, glyphs }, page, w, hh, text);
-      if (taught) this.actions.announce(`Yazıya çevrildi; ${taught} harf öğrenildi`);
-    };
-    const dismiss = () => this.closeSuggestion();
-    input.addEventListener("keydown", (e) => {
-      // Ctrl/Cmd kısayolları (Ctrl Z, Ctrl S…) uygulamaya geçer; öneri kapanır, el yazısı kalır.
-      if (e.ctrlKey || e.metaKey) return dismiss();
-      e.stopPropagation();
-      if (e.key === "Enter") (e.preventDefault(), accept());
-      else if (e.key === "Escape") (e.preventDefault(), dismiss());
-    });
-    const el = h("div", { class: "cm-hwsug", role: "dialog", "aria-label": "Yazıya çevirme önerisi" },
-      h("span", { class: "cm-hwsug__icon", "aria-hidden": "true" }, icon("totext")),
-      input,
-      h("button", { class: "cm-hwsug__btn cm-hwsug__btn--ok", title: "Yazıya çevir (Enter)", "aria-label": "Yazıya çevir", onclick: accept }, icon("check")),
-      h("button", { class: "cm-hwsug__btn", title: "El yazısı kalsın (Esc)", "aria-label": "El yazısı kalsın", onclick: dismiss }, icon("close")),
-    );
-    el.addEventListener("pointerdown", (e) => e.stopPropagation());
-    const [bx, by, , bh] = res.box;
-    el.style.left = `${bx * 100}%`;
-    el.style.top = `calc(${(by + bh) * 100}% + 8px)`;
-    pageEl.append(el);
-    this.suggestion = { page, ids: marks.map((m) => m.id), el };
-    // Enter hemen çalışsın: imleç öneride (yazmaya devam etmek odağı almaz, Enter yine çevirir).
-    input.focus({ preventScroll: true });
-    input.setSelectionRange(input.value.length, input.value.length);
-    this.actions.announce(`Öneri: ${res.text}. Düzeltip Enter'a bas`);
-  }
-
-  /** El yazısını metin kutusuna çevir (Ctrl Z el yazısını geri getirir). */
-  private applyText(marks: Mark[], res: HwLine, page: number, w: number, hh: number, text: string): void {
-    const z = this.viewer.scale || 1;
-    const [bx, by, bw, bh] = res.box;
-    const cap = res.capPx / hh;
-    const cy = by + bh / 2;
-    const glyphs = res.glyphs.filter((g) => g.ch.trim());
-    const prev = this.actions.marks().find((m): m is Extract<Mark, { kind: "text" }> =>
-      m.kind === "text" && m.page === page && !!m.hw && Math.abs(m.hw.cy - cy) < Math.max(m.hw.cap, cap) * 0.5 &&
-      bx - m.hw.right > -0.005 && (bx - m.hw.right) * w < res.capPx * 2.5);
-    const now = Date.now();
-    const ops: Op[] = marks.map((m) => ({ remove: m }));
-    marks.forEach((m) => {
-      this.actions.remove(m.id);
-      this.rawOf.delete(m.id);
-    });
-    if (prev) {
-      const space = (bx - prev.hw!.right) * w > res.capPx * 0.45 ? " " : "";
-      const right = Math.max(prev.hw!.right, bx + bw);
-      const after: Mark = {
-        ...prev, text: `${prev.text}${space}${text}`, updatedAt: now,
-        box: [prev.box[0], prev.box[1], Math.max(prev.box[2], right - prev.box[0] + (bw / Math.max(1, text.length)) * 2), prev.box[3]],
-        hw: { glyphs: [...prev.hw!.glyphs, ...glyphs], right, cy: prev.hw!.cy, cap: prev.hw!.cap },
-      };
-      this.actions.update(after);
-      ops.push({ before: prev, after });
-    } else {
-      // Yazı boyutu el yazısının büyük harf yüksekliğine göre; kutu el yazısının yerine oturur.
-      const size = Math.max(10, Math.min(64, Math.round(res.capPx / z / 0.72)));
-      const ink = marks.find((m) => "color" in m) as { color: InkColor } | undefined;
-      const m: Mark = {
-        id: uid(), fileHash: this.fileHash, page, kind: "text", color: ink?.color ?? this.color, text, size,
-        box: [Math.max(0, bx - (6 * z) / w), Math.max(0, by - ((4 + size * 0.22) * z) / hh), Math.min(1 - bx, Math.max(0.08, bw * 1.3 + (24 * z) / w)), 0.03],
-        hw: { glyphs, right: bx + bw, cy, cap },
-        createdAt: now, updatedAt: now,
-      };
-      this.actions.add(m);
-      ops.push({ add: m });
-    }
-    this.record(ops);
-    this.actions.announce(`Yazıya çevrildi: ${text}. Ctrl Z el yazısını geri getirir`);
-  }
-
 
   private drawShape(e: PointerEvent, at: NonNullable<ReturnType<WriteMode["pageAt"]>>): void {
     const live = this.live(at.el);
@@ -1072,9 +962,10 @@ export class WriteMode {
       btn("copy", "Çoğalt", () => this.duplicate()),
       btn("trash", "Sil (Del)", () => this.deleteSelected()),
     );
-    // Köşeler oranlı / serbest ölçekler; kenarlar tek yönde uzatır (tek metin kutusu ve notta kendi genişlik tutamacı var).
+    // Köşeler oranlı / serbest ölçekler; kenarlar tek yönde uzatır. Metin kutusu ve notta yükseklik yazıya göre
+    // kendiliğinden olur: yalnızca yan kenarlar (yazı boyutu değişmeden genişlik).
     const single = sel.marks.length === 1 ? sel.marks[0].kind : null;
-    const handles = single === "text" || single === "sticky" ? ["nw", "ne", "sw", "se"] : ["nw", "ne", "sw", "se", "n", "s", "e", "w"];
+    const handles = single === "text" || single === "sticky" ? ["nw", "ne", "sw", "se", "e", "w"] : ["nw", "ne", "sw", "se", "n", "s", "e", "w"];
     const box = h("div", { class: `cm-selbox${passive ? " cm-selbox--passive" : ""}`, "aria-hidden": "false" },
       ...handles.map((c) => h("span", { class: `cm-selbox__h cm-selbox__h--${c}`, "data-scale": c, "aria-hidden": "true" })),
       bar,
@@ -1171,6 +1062,13 @@ export class WriteMode {
       if (!edge && (keepRatio || ev.shiftKey)) sx = sy = Math.max(sx, sy);
       for (const { n, m } of nodes) {
         const st = (n as HTMLElement).style;
+        if (edge && sy === 1 && (m.kind === "text" || m.kind === "sticky") && !(n instanceof SVGElement)) {
+          // Yan kenar: yazı esnetilmez, kutu genişler / daralır ve yazı yeniden akar.
+          const s = scaleMark(m, ox, oy, sx, 1).box;
+          st.left = `${s[0] * 100}%`;
+          st.width = `${s[2] * 100}%`;
+          continue;
+        }
         if (n instanceof SVGElement) {
           st.transformBox = "view-box";
           st.transformOrigin = `${ox}px ${oy}px`;
@@ -1368,24 +1266,7 @@ export class WriteMode {
         return;
       }
       const size = before.kind === "text" && host!.style.getPropertyValue("--fs") ? parseFloat(host!.style.getPropertyValue("--fs")) : undefined;
-      // El yazısından çevrilmiş kutuda düzeltilen harfler öğrenilir (harf sayısı aynıysa).
-      let hw = before.kind === "text" ? before.hw : undefined;
-      if (hw && before.kind === "text" && text !== before.text) {
-        const oldCh = [...before.text.replace(/\s+/g, "")];
-        const newCh = [...text.replace(/\s+/g, "")];
-        if (oldCh.length === hw.glyphs.length && newCh.length === oldCh.length) {
-          let taught = 0;
-          newCh.forEach((c, i) => {
-            if (c !== oldCh[i]) {
-              learn(c, hw!.glyphs[i].strokes);
-              taught++;
-            }
-          });
-          hw = { ...hw, glyphs: hw.glyphs.map((g, i) => ({ ...g, ch: newCh[i] })) };
-          if (taught) this.actions.announce(`${taught} harf öğrenildi; bir dahakine daha iyi tanınır`);
-        } else hw = undefined;
-      }
-      const after = { ...before, text, ...(size ? { size } : {}), ...(before.kind === "text" ? { hw } : {}), box: [cur[0], cur[1], cur[2], hgt], updatedAt: Date.now() } as Mark;
+      const after = { ...before, text, ...(size ? { size } : {}), box: [cur[0], cur[1], cur[2], hgt], updatedAt: Date.now() } as Mark;
       this.actions.update(after);
       this.record([isNew ? { add: after } : { before, after }]);
     };

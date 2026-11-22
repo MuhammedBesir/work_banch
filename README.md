@@ -1,12 +1,41 @@
-# Çalışma Masası
+<p align="center">
+  <img src="public/icon.svg" width="112" height="112" alt="Defter logosu">
+</p>
 
-Üniversite öğrencisinin ders slaytlarını ve kitap PDF'lerini okuyup vurguladığı, not aldığı ve sınav öncesi topladığı, **tamamen tarayıcıda çalışan** bir araç.
+<h1 align="center">Defter</h1>
 
-> Dosyan bilgisayarından çıkmaz; açma, okuma ve vurgular tamamen bu tarayıcıda işlenir.
+<p align="center">
+  Ders PDF'lerini oku, vurgula, elle not al ve sınava tekrar et.<br>
+  Tamamen tarayıcıda çalışır; dosyan bilgisayarından çıkmaz.
+</p>
 
-**Canlı:** https://calisma-masasi-cyan.vercel.app — `main` branch'ine her push Vercel'de otomatik yayınlanır; diğer branch'ler önizleme adresi alır.
+<p align="center">
+  <a href="https://calisma-masasi-cyan.vercel.app"><b>Uygulamayı aç</b></a> ·
+  <a href="docs/tasarim-sistemi.md">Tasarım sistemi</a>
+</p>
 
-Tasarım kararları, renk/şekil sözleşmesi, etkileşim kuralları ve riskler [`docs/`](docs/) altında; tasarım token'larının tek kaynağı [`design/tokens.json`](design/tokens.json).
+---
+
+Defter, üniversite öğrencisinin ders slaytlarını ve kitap PDF'lerini tek yerde çalışması için yapıldı. Sunucusu, hesabı ve reklamı yok: açma, okuma, vurgular, el yazısı ve yedek bu tarayıcıda kalır. Yüklenebilir (PWA) ve çevrimdışı açılır.
+
+> Eski adı **Çalışma Masası**. Ad değişti, veriler değişmedi: kayıtlı dosyalar, vurgular ve eski `.json` yedekleri olduğu gibi açılır.
+
+## Neler yapar
+
+| Mod | Ne işe yarar |
+| --- | --- |
+| **Oku** `Alt 1` | Sürekli ya da sayfa sayfa okuma, dört renkli ve şekilli vurgu, not, arama, içindekiler, kaldığın yerden devam. |
+| **Yaz** `Alt 2` | Kalem, fosforlu, metin kutusu, yapışkan not, şekil, kement ve silgi. Şekil ve eğik satır düzeltme, yazı yumuşatma. |
+| **Düzenle** `Alt 3` | Sayfaları sırala, döndür, sil, çoğalt, not sayfası ekle, PDF birleştir; kayıt her zaman yeni bir kopyaya. |
+| **Tekrar** `Alt T` | Vurgulardan otomatik kartlar ve aralıklı tekrar. |
+
+Bunların yanında: **Kitaplık** (dersler, kapaklar, kaldığın yerden devam), **dışa aktarma** (Markdown, vurgulu PDF, Word, PowerPoint, PNG), **yedek ve paylaşım paketi**, taranmış sayfalar için **tarayıcıda OCR** ve isteğe bağlı **AI yardımcısı** (varsayılan kapalı; cihazda model ya da kendi API anahtarın).
+
+## Gizlilik
+
+- Dosyalar ve işaretler yalnızca bu tarayıcıda (IndexedDB, OPFS) durur.
+- Üretim derlemesi sıkı bir CSP ile gelir: üçüncü taraf script yok; dışarıya yalnızca seçtiğin AI sağlayıcısına ve cihazda model indirmeye bağlantı açılır.
+- AI açıksa her istekte neyin gönderileceği görünür; dosyanın tamamı asla kendiliğinden gönderilmez.
 
 ## Çalıştırma
 
@@ -38,22 +67,15 @@ npm run e2e
 
 Tek tarayıcı için `npx playwright test --project=chromium` (projeler: `chromium`, `firefox`, `webkit`, `ipad`). GitHub Actions her push'ta birim testleri ve dört tarayıcıyı da çalıştırır.
 
-`npm run build` çıktısı (`dist/`) herhangi bir statik sunucudan yayınlanabilir; sunucu tarafı yoktur. Üretim derlemesine sıkı bir CSP eklenir (üçüncü taraf script yok; dış bağlantılar yalnızca seçilen AI sağlayıcısına ve cihazda model indirmeye), yazı tipleri ve OCR verisi pakete gömülüdür. Uygulama yüklenebilir (PWA) ve çevrimdışı açılır.
+## Yayın
 
-## Son eklenenler
+**Canlı:** https://calisma-masasi-cyan.vercel.app — `main` branch'ine her push Vercel'de otomatik yayınlanır; diğer branch'ler önizleme adresi alır. `npm run build` çıktısı (`dist/`) herhangi bir statik sunucudan da yayınlanabilir; sunucu tarafı yoktur.
 
-- **El yazısını yazıya çevirme (cihazda)** — rakamlar 0–9, Türk alfabesinin 29 harfi (küçük ve büyük) ve `+ − = × / ( ) ? . ,`. Kalem paletinde **Yazıya çevir: öneri · otomatik · kapalı**. *Öneri* (varsayılan): ~1,4 sn ara verince el yazısının altında düzenlenebilir öneri çıkar, Enter / ✓ çevirir, Esc / ✕ el yazısını bırakır; öneride düzeltilen her harf senin şablonun olur. *Otomatik*: emin olunca sorulmadan çevirir. **El yazını öğret** penceresi: her karakteri fare, kalem ya da parmakla bir iki kez yazarak tanımayı kendi yazına uydurursun (yalnızca bu cihazda). Yöntem: $P nokta bulutu tanıyıcı; harfler yazılış sırasından ayrılır, nokta/çengel/kaş altındaki harfe bağlanır, şüpheli harfler bölünmeyi / birleşmeyi dener; nokta sayısı tutmayan şablon (u/ü, o/ö, ı/i) cezalanır; büyük/küçük harf ve 0/o, 1/l/ı, 5/s satır ve kelime bağlamından seçilir. Yazının ortasındaki büyük o, l, 1 şekle çevrilmez. Ayrık (harfleri ayrı) yazı içindir; bitişik el yazısı tanınmaz.
-- **El yazısı düzgünleştirme** — kalem dengeleyici titremeyi yazarken süzer (Yazı yumuşatma: hafif · güçlü · kapalı, kalem paletinde); kalem kalkınca çizgi bir kez daha yumuşatılır, uçlar ve kısa çizgiler (nokta, virgül) korunur. Ara vermeden yazılan sayı ve yazı satırı 2,5°–15° eğikse ~1 sn ara verince ortasından döndürülüp düzlenir; yeni satıra geçince önceki satır hemen düzelir. `Ctrl Z` geri alır; "Otomatik düzeltme" düğmesi şekillerle birlikte kapatır. Şekil tanıma süzülmemiş çizgiye bakar.
-- **Şekiller ve otomatik düzeltme** — Şekil aracında dokuz şekil: çizgi, ok, dikdörtgen, daire, üçgen, eşkenar dörtgen, beşgen, altıgen, yıldız. Kalemle çizilen çizgi, üçgen, dörtgen, daire ve çok köşeli şekiller kalem kalkınca kendiliğinden düzelir (neredeyse yatay/dikey kenarlar hizalanır, neredeyse kare/daire tam olur); küçük çizimler (el yazısı) dokunulmaz. İlk `Ctrl Z` ham çizime döner. Kalem paletindeki düğmeyle kapatılır. Seçim kutusunda köşe ve kenar tutamaçları, Küçült / Büyüt düğmeleri ve `+` / `−` tuşları; yazı köşeden ölçeklenince harf boyutu değişir, biçim çubuğunda A− / A+. Metin kutusunun zemini şeffaf. Kısmi silgi düzeltilmiş çizgileri de böler.
-- **Kitaplık ekranı** — büyük bırakma kartı yerine başlık (Kitaplık · N ders · N PDF · N vurgu) ve eylem satırı (PDF aç, Yeni ders, Not defteri, Paket aç); bırakma bütün sayfada çalışır. Ders kartları renkli ve son çalışılan PDF'lerin kapaklarıyla; dosyalar tablo yerine kapaklı satırlarda, ikinci satırda ders · kaldığın yer · vurgu ve ince okuma ilerleme çubuğu. Yedek uyarısı tek satır.
-- **Dersler (klasörler)** — ana ekranda "Derslerim": her ders bir kart (PDF ve vurgu sayısı). Dersin içindeyken seçilen ya da bırakılan PDF o derse eklenir; kitaplıktaki bir dosya ders kartına sürüklenerek taşınır. Boş dersler de saklanır ve yedeğe girer; ders silinince PDF'ler kitaplıkta kalır.
-- **Kitaplık düğmesi ve otomatik kayıt** — üst çubuğun solundaki ‹ Kitaplık PDF'i kapatıp ana sayfaya döner. Çıkmadan önce her şey kaydedilir: yazılmakta olan metin kutusu ve not, kaldığın sayfa, Düzenle modundaki sayfa değişiklikleri (soru sormadan yeni kopya). Metin kutusu yazılırken ~0,5 sn'lik her duraklamada kaydedilir. Üst çubukta durum: Kaydedildi · Kaydediliyor… · Kaydedilemedi; Düzenle modunda "N değişiklik · çıkışta kopya alınır".
-- **Metin kutusu** — imleç tam tıklanan noktada başlar (yakınlaştırma hesaba katılır); yazarken biçim çubuğundaki ✥ ile taşınır, sağ kenardaki tutamaçla genişletilir; dört yazı boyutu (küçük, orta, büyük, başlık); boş yere tıklamak yalnızca yazmayı bitirir.
-- **Otomatik metin tanıma** — görüntülenen sayfa ve komşuları arka planda çözümlenir: metinsiz (taranmış), bozuk yazı tipli ya da resim içinde yazı bulunan sayfalar kendiliğinden tanınır; resimdeki yazı PDF metnine eklenir. Dosya menüsünden kapatılabilir. Boş not defteri sayfaları atlanır.
-- **Ücretsiz AI sağlayıcıları** — Gemini'ye ek olarak **Groq** (günlük sınırı yüksek, çok hızlı) ve **OpenRouter** (ücretsiz modeller). "Anahtarı dene ve modelleri yükle" hesabın modellerini listeler. Sınır dolunca (429) sağlayıcı adı ve bekleme süresiyle mesaj; Gemini'de sınır dolunca ya da model bulunamayınca diğer Flash / Flash-Lite modelleri denenir. AI paneli İşaretler'den bağımsız kapanır (×, Ctrl J).
-- **Apple tarzı sade tasarım** — nötr gri palet, sistem yazı tipi (SF), saç teli çizgiler, buzlu cam menüler ve paletler, iOS tarzı bölümlü denetimler, dolu filtre çipleri, yumuşak gölgeli kartlar; açık ve koyu temada AA kontrastı. Safari/iPad'de son açılanlardan yeniden açma (OPFS'e yazılamazsa kopya IndexedDB'de) düzeltildi.
+Tasarım kararları, renk/şekil sözleşmesi, etkileşim kuralları ve riskler [`docs/`](docs/) altında; tasarım token'larının tek kaynağı [`design/tokens.json`](design/tokens.json).
 
-## Oku modu ve v1 kapsamı
+## Ayrıntılı özellikler
+
+### Oku modu ve v1 kapsamı
 
 [`docs/ozellikler.md`](docs/ozellikler.md) ve [`docs/riskler.md`](docs/riskler.md)'deki "ilk sürümde kalmalı" listesi:
 
@@ -81,18 +103,18 @@ Tek tarayıcı için `npx playwright test --project=chromium` (projeler: `chromi
 - **Yedek hatırlatma** — 7 günde bir, vurgu varsa ve yedek alınmadıysa kısa bir bant (3 gün ertelenebilir).
 - **Hata günlüğü** — isteğe bağlı (Ayarlar), yalnızca bu cihazda; dosya adı ve içerik içermez, JSON olarak indirilebilir.
 
-## Yaz modu (v1.1)
+### Yaz modu (v1.1)
 
 `Alt 2` ya da üst bardaki mod seçici. Araçlar sayfanın solunda yüzen dar bir palette; üst bar ve paneller yerinden oynamaz.
 
 - **Araçlar:** Seç `V`, Vurgu `H` (Oku modundaki metin seçimi), Kalem `P`, Metin kutusu `T`, Yapışkan not `S`, Şekil `R` (dikdörtgen, daire, ok), Silgi `E`. Kalem rengi `Shift 1–3` (siyah, mavi, düzeltme kırmızısı), üç kalınlık. `Ctrl Z` / `Ctrl Shift Z` her işlem için; `Esc` Oku moduna döner.
-- **Çizimler vektör:** sayfaya göre 0–1 koordinatlarla SVG olarak saklanır, zoom'da bozulmaz. Kalemle (stylus) çizerken basınç çizgi boyunca kalınlığa yansır. `Shift` ile düz çizgi / kare / daire; `Shift`-tık ile çoklu seçim; metin kutusunun sağ kenarındaki tutamaçla genişlik değişir. Çizimler sol şeritteki küçük sayfalarda da görünür. Telefonda palet alta yatay yerleşir.
+- **Çizimler vektör:** sayfaya göre 0–1 koordinatlarla SVG olarak saklanır, zoom'da bozulmaz. Kalemle (stylus) çizerken basınç çizgi boyunca kalınlığa yansır. `Shift` ile düz çizgi / kare / daire; `Shift`-tık ile çoklu seçim; metin kutusunun genişliği yazarken sağ kenardaki tutamaçla, seçiliyken sağ ve sol kenar tutamaçlarıyla değişir (yazı boyutu aynı kalır; köşe tutamaçları yazıyla birlikte ölçekler). Çizimler sol şeritteki küçük sayfalarda da görünür. Telefonda palet alta yatay yerleşir.
 - **Avuç reddi:** parmak dokunuşu Yaz modunda da yalnızca sayfayı kaydırır; fare ve kalem çizer.
 - **Silgi** bütün çizgiyi siler (kısmi silme yok). **Seç** aracıyla işaretler sürüklenerek taşınır, `Del` ile silinir; metin kutusu ve nota çift tıklayınca düzenlenir. Boş kalan metin kutusu kendiliğinden silinir. Yapışkan not 16 px'lik köşe işaretine daraltılabilir.
 - **İşaretler paneli** türe göre filtreler (Vurgu / Yazı / Çizim). Kalem çizimleri sayfa başına tek satırdır; el yazısı aranamaz, panel bunu açıkça yazar.
 - Metin kutuları ve notlar **Markdown dışa aktarmaya** girer (isteğe bağlı); tüm işaretler **JSON yedeğe** girer ve **Düzenle modunda** kaydedilen kopyaya sayfalarıyla (döndürmeyle birlikte) taşınır.
 
-## Samsung Notes'tan esinlenen not araçları
+### Samsung Notes'tan esinlenen not araçları
 
 - **Kalem türleri:** tükenmez, kurşun kalem, fosforlu (yarı saydam), dolma kalem (açılı uç, yöne göre kalınlık). Üç hazır renk + 12 özel ton ve renk seçici; son kullanılan özel renkler palette kalır.
 - **Kısmi silgi** (çizginin değdiği kısmı siler) ya da **bütün çizgi**. Kalemin yan tuşu ya da silgi ucu basılıyken geçici silgi.
@@ -113,17 +135,17 @@ Tek tarayıcı için `npx playwright test --project=chromium` (projeler: `chromi
 
 Bilerek yok: gerçek zamanlı ortak düzenleme ve hesapla bulut eşitleme (sunucu ve hesap gerektirir; uygulama bilerek sunucusuz).
 
-## AI ile quiz ve alan seç
+### AI ile quiz ve alan seç
 
 - **Quiz:** belgenin son sayfasının altında *AI ile quiz oluştur*. Soru tipleri (çoktan seçmeli, doğru/yanlış, boşluk doldurma, kısa cevap, klasik), sayı, zorluk, kapsam (tüm belge, bu sayfa, sayfa aralığı, vurgularım) ve serbest ek istek ("vize formatında, her soru 10 puan"). Quiz sayfanın altında etkileşimli: şık seç, *Kontrol et* ile puan, her sorunun açıklaması ve dayandığı sayfa. Markdown indir, Tekrar moduna kart olarak ekle.
 - **Alan seç ve sor** (`Shift A` ya da AI panelinde *Alan seç*): sayfada istediğin yeri fareyle, kalemle ya da parmakla çerçevele. Alanın görüntüsü ve metni gider; şekil, formül, grafik ve tablolar da görülür (Gemini, Claude, OpenAI). Görüntü göndermeyen sağlayıcıda alanın yazısı bu cihazda tanınır. *Bu sayfa* kapsamında da "Görüntüsünü de gönder" seçilebilir.
 - **AI penceresi** sol kenarından sürüklenerek ekranın %70'ine kadar genişler; başlıktaki düğmeyle tam ekran olur (Esc ile çık).
 
-## Tekrar modu
+### Tekrar modu
 
 `Alt T` ya da Dışa aktar menüsü. Vurgulardan otomatik kartlar (vurgu ön yüz, notun arka yüz), basitleştirilmiş aralıklı tekrar (Tekrar et / Zor / Kolay; `Space` çevir, `1`–`3` puan). AI açıksa "Kart öner" tanımlardan kart önerir; öneriler onaylanmadan desteye girmez.
 
-## AI yardımcısı (v2)
+### AI yardımcısı (v2)
 
 Varsayılan **kapalı**; kapalıyken AI'a dair hiçbir düğme görünmez. Ayarlar > AI > "AI'yı aç…" ile bir sağlayıcı seç:
 
@@ -141,13 +163,13 @@ Sohbet geçmişi dosya başına saklanır, Markdown olarak dışa aktarılır; h
 - **Hatalar** (geçersiz anahtar, sınır/kredi, bağlantı) "ne oldu + ne yapabilirsin" biçiminde panelde görünür, okumayı engellemez.
 - **Teknik:** istek tarayıcıdan doğrudan `api.anthropic.com`'a resmi `@anthropic-ai/sdk` ile gider (arada sunucu yok); SDK ayrı bir parça olarak yalnızca ilk soruda yüklenir. Opus 5.5 ve Sonnet 5.5'te reddedilen istek için sunucu tarafı yedek model (`fallbacks: "default"`) açıktır. Anahtar yalnızca bu tarayıcıda (IndexedDB) saklanır, **JSON yedeğe girmez**, Ayarlar'dan silinir. Üretim CSP'si dışarıya yalnızca `https://api.anthropic.com` bağlantısına izin verir. Düşük harcama sınırlı bir anahtar kullanman önerilir.
 
-### Bilerek bu sürümde yok
+#### Bilerek bu sürümde yok
 
 Koyu temada invert, serbest renk, aynı anda çoklu dosya, hesap/senkronizasyon.
 
 ## Performans
 
-- Açılış paketi ~286 KB (gzip ~98 KB). pdf.js, pdf-lib, AI SDK'ları, KaTeX, OCR, Word/PowerPoint kütüphaneleri ayrı parçalar; pdf.js açılış ekranından sonra boşta önceden yüklenir.
+- Açılış paketi ~347 KB (gzip ~117 KB). pdf.js, pdf-lib, AI SDK'ları, KaTeX, OCR, Word/PowerPoint kütüphaneleri ayrı parçalar; pdf.js açılış ekranından sonra boşta önceden yüklenir.
 - 400 sayfalık belge ~1 sn'de açılır, bellekte ~13 MB; aynı anda yalnızca görünen sayfalar (±2) çizilir, uzaktakiler bırakılır. Kaydırırken önce ekrandaki sayfalar, komşular duraksayınca; hızlı kaydırmada geçilen sayfalar çizilmez.
 - OCR motoru 90 sn kullanılmazsa kapanır.
 
@@ -174,8 +196,9 @@ src/ui/                   boş durum, panel, AI paneli, şerit, yüzen çubuk, a
 src/db.ts                 IndexedDB (dosyalar, vurgular, Yaz modu işaretleri, kartlar, ayarlar ve meta)
 src/markdown.ts           Markdown dışa aktarma
 src/backup.ts             JSON yedek / geri yükleme
-src/styles/components.css tasarım sistemindeki bileşen stilleri (cm-*)
-src/styles/app.css        gerçek uygulama düzeni, sayfa katmanları, duyarlı düzen
+src/styles/tokens.css     design/tokens.json'dan üretilir (elle düzenlenmez)
+src/styles/components.css bileşenler (cm-btn, cm-seg, cm-chip, cm-menu, pencere, bant…): her biri bir kez
+src/styles/app.css        ekran düzeni: okuyucu, sayfa katmanları, Yaz/Düzenle/Tekrar, Kitaplık, duyarlı düzen
 tests/                    vitest: geometri, Yaz modu, AI, Markdown, biçimlendirme, yedek, tekrar, Düzenle modu dönüşümleri
 e2e/                      Playwright: okuma, Yaz, Tekrar, OCR ve axe erişilebilirlik denetimi (4 tarayıcı projesi)
 scripts/                  token üretimi, OCR verisini kopyalama, service worker şablonu

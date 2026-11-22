@@ -64,11 +64,12 @@ export class Home {
     this.dropSlot = h("div", { style: "display:contents" }, this.drop);
     this.recent = h("section", { class: "cm-recent", "aria-labelledby": "recent-h" });
     const bar = h("header", { class: "cm-bar" },
-      h("span", { class: "cm-bar__brand" }, h("img", { class: "cm-bar__logo", src: "./icon.svg", alt: "", width: 22, height: 22 }), "Çalışma Masası"),
+      h("span", { class: "cm-bar__brand" }, h("img", { class: "cm-bar__logo", src: "./icon.svg", alt: "", width: 22, height: 22 }), "Defter"),
       h("span", { class: "cm-bar__spacer" }),
-      h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm", onclick: () => actions.settings() }, "Ayarlar"),
+      h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--icon", "aria-label": "Ayarlar", title: "Ayarlar", onclick: () => actions.settings() }, icon("settings")),
     );
-    this.el = h("div", { class: "cm-app" }, bar, h("div"), h("main", { class: "cm-home" }, this.dropSlot, this.notice, this.recent));
+    // Yedek hatırlatması kitaplığın altında, tek satır: içerik önce gelir.
+    this.el = h("div", { class: "cm-app" }, bar, h("div"), h("main", { class: "cm-home" }, this.dropSlot, this.recent, this.notice));
     this.showIdle();
   }
 
@@ -237,15 +238,20 @@ export class Home {
           : h("p", { class: "cm-muted", text: "Bu filtrede dosya yok." }))
       : this.actions.view === "grid" ? this.grid(shown) : this.list(shown, !!inFolder);
 
-    // Hızlı eylemler (başlıkta): PDF aç, yeni ders, not defteri, paket.
+    // Hızlı eylemler (başlıkta): yeni ders, not defteri, seyrek olanlar ⋯ menüsünde; birincil "PDF aç" en sağda.
+    const libMore = h("button", { class: "cm-btn cm-btn--icon", "aria-label": "Diğer: paylaşım paketi aç, listeyi temizle", title: "Diğer", "aria-haspopup": "menu" }, icon("more"));
+    libMore.addEventListener("click", () => openMenu(libMore, [
+      { label: "Paylaşım paketi aç…", hint: ".json", run: () => this.actions.importBundle() },
+      ...(rows.length ? ["sep" as const, { label: "Son açılanları temizle", run: () => this.actions.clearRecent() }] : []),
+    ], "right"));
     const quick = (primaryLabel: string) => h("div", { class: "cm-lib__actions" },
-      h("button", { class: "cm-btn cm-btn--primary cm-btn--withicon cm-lib__primary", title: `${primaryLabel} (Ctrl O)`, onclick: () => this.actions.pick() }, icon("plus"), h("span", { text: primaryLabel }), kbd("Ctrl O")),
       h("button", { class: "cm-btn cm-btn--withicon", title: "Yeni ders", onclick: async () => {
         const n = await this.actions.createFolder();
         if (n) this.go(n);
       } }, icon("folder"), h("span", { class: "is-wide", text: "Yeni ders" })),
       h("button", { class: "cm-btn cm-btn--withicon", title: "Yeni not defteri", onclick: () => this.actions.newNotebook() }, icon("notebook"), h("span", { class: "is-wide", text: "Not defteri" })),
-      h("button", { class: "cm-btn cm-btn--withicon", title: "Paylaşım paketi aç", onclick: () => this.actions.importBundle() }, icon("package"), h("span", { class: "is-wide", text: "Paket aç" })),
+      libMore,
+      h("button", { class: "cm-btn cm-btn--primary cm-btn--withicon cm-lib__primary", title: `${primaryLabel} (Ctrl O)`, onclick: () => this.actions.pick() }, icon("plus"), h("span", { text: primaryLabel }), kbd("Ctrl O")),
     );
     const totalHl = rows.reduce((a, r) => a + r.highlights, 0);
     const joinStats = (parts: (string | null)[]) => parts.filter(Boolean).join(" · ");
@@ -338,6 +344,9 @@ export class Home {
       h("ul", { class: "cm-foldergrid", role: "list" }, ...folders.map(card), newCard),
     );
     const lastAll = Math.max(0, ...rows.map((r) => r.rec.lastOpened));
+    // Kaldığın yerden devam: en son açılan, erişilebilir ve kilitsiz dosya; tek tıkla kaldığın sayfaya.
+    const latest = [...rows].filter((r) => r.reachable).sort((a, b) => b.rec.lastOpened - a.rec.lastOpened)[0];
+    const resume = latest ? this.resumeCard(latest) : null;
     this.recent.replaceChildren(
       h("header", { class: "cm-lib__head" },
         h("div", { class: "cm-lib__title" },
@@ -345,17 +354,38 @@ export class Home {
           h("p", { class: "cm-lib__sub", text: joinStats([folders.length ? `${num(folders.length)} ders` : null, `${num(rows.length)} PDF`, totalHl ? `${num(totalHl)} vurgu` : null, lastAll ? `son çalışma ${relative(lastAll)}` : null]) || "PDF'ini buraya sürükle ya da seç" })),
         quick("PDF aç"),
       ),
+      ...(resume ? [resume] : []),
       courses,
       ...(rows.length ? [
         h("div", { class: "cm-lib__sect cm-lib__tools" },
           h("h2", { id: "recent-h", text: "Son açılanlar" }),
-          h("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap" }, search, view,
-            h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm", onclick: () => this.actions.clearRecent() }, "Listeyi temizle")),
+          h("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap" }, search, view),
         ),
         ...(filters ? [filters] : []),
         content,
       ] : []),
       foot,
+    );
+  }
+
+  /** "Kaldığın yerden devam" kartı: kapak, ad, ders · sayfa · vurgu, ilerleme; tıklayınca kaldığın sayfada açılır. */
+  private resumeCard(row: RecentRow): HTMLElement {
+    const { rec } = row;
+    const cover = h("span", { class: "cm-resume__cover", "aria-hidden": "true" }, h("span", { class: "cm-file__initial", text: rec.name.replace(/\.pdf$/i, "").slice(0, 1).toUpperCase() }));
+    if (rec.cover) cover.style.setProperty("--cover", rec.cover);
+    if (rec.lock) cover.append(h("span", { class: "cm-file__lock", text: "🔒" }));
+    else void this.actions.thumb(rec.hash).then((src) => src && cover.replaceChildren(h("img", { src, alt: "" })));
+    const ratio = rec.pageCount ? Math.min(1, (rec.lastPage + 1) / rec.pageCount) : 0;
+    const meta = [rec.folder ?? null, `sayfa ${num(rec.lastPage + 1)} / ${num(rec.pageCount)}`, row.highlights ? `${num(row.highlights)} vurgu` : null, relative(rec.lastOpened)].filter(Boolean).join(" · ");
+    return h("button", { class: "cm-resume", "aria-label": `Kaldığın yerden devam: ${rec.name}, sayfa ${rec.lastPage + 1}`, onclick: () => this.actions.openRecent(row) },
+      cover,
+      h("span", { class: "cm-resume__body" },
+        h("span", { class: "cm-resume__kicker", text: "Kaldığın yerden devam" }),
+        h("span", { class: "cm-resume__name", text: rec.name.replace(/\.pdf$/i, "") }),
+        h("span", { class: "cm-resume__meta", text: meta }),
+        h("span", { class: "cm-file__bar" }, h("span", { class: `cm-file__fill${ratio >= 0.999 ? " is-done" : ""}`, style: `width:${Math.max(PROGRESS_MIN, ratio) * 100}%` })),
+      ),
+      h("span", { class: "cm-resume__go", "aria-hidden": "true" }, "Devam et", icon("back")),
     );
   }
 

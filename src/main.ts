@@ -1,14 +1,8 @@
-import "@fontsource/ibm-plex-sans/400.css";
-import "@fontsource/ibm-plex-sans/500.css";
-import "@fontsource/ibm-plex-sans/600.css";
-import "@fontsource/ibm-plex-mono/400.css";
-import "@fontsource/ibm-plex-mono/500.css";
 import "@fontsource/source-serif-4/400.css";
 import "@fontsource/source-serif-4/600.css";
 import "./styles/tokens.css";
 import "./styles/components.css";
 import "./styles/app.css";
-import "./styles/apple.css";
 
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import * as db from "./db";
@@ -91,7 +85,6 @@ interface Reader {
   zoomLabel: HTMLElement;
   panelBtn: HTMLButtonElement;
   railBtn: HTMLButtonElement;
-  themeBtn: HTMLButtonElement;
   modeSeg: HTMLElement;
   pageFlag: HTMLElement;
   editor: PageEditor | null;
@@ -170,10 +163,6 @@ function applySettings(): void {
   setErrorLog(settings.errorLog);
   if (reader) {
     reader.body.style.setProperty("--panel-width", `${settings.panelWidth}px`);
-    const dark = resolvedTheme() === "dark";
-    reader.themeBtn.replaceChildren(icon(dark ? "sun" : "moon"));
-    reader.themeBtn.setAttribute("aria-label", dark ? "Açık tema" : "Koyu tema");
-    reader.themeBtn.title = dark ? "Açık tema" : "Koyu tema";
     reader.panel.setData(highlights, settings.names, marks);
     updateAiUi();
     quizView?.render(quizzes);
@@ -237,7 +226,7 @@ function settingsDialog(): void {
           ? h("pre", { class: "cm-code", style: "max-height:420px;overflow:auto", text: list.map((e) => `${new Date(e.at).toLocaleString("tr-TR")} · ${e.kind} · v${e.version}\n${e.message}${e.stack ? `\n${e.stack}` : ""}`).join("\n\n") })
           : h("p", { style: "margin:0", text: settings.errorLog ? "Kayıtlı hata yok." : "Günlük kapalı. Açınca bundan sonraki hatalar bu tarayıcıda kaydedilir." }));
       },
-      download: async () => download(`calisma-masasi-hatalar-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(await readErrors(), null, 2), "application/json"),
+      download: async () => download(`defter-hatalar-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(await readErrors(), null, 2), "application/json"),
       clear: async () => (await clearErrors(), toast("Hata günlüğü temizlendi")),
     },
   });
@@ -246,7 +235,7 @@ function settingsDialog(): void {
 /** JSON yedek: indirilir ve son yedek zamanı hatırlanır (hatırlatma için). */
 async function backupNow(): Promise<void> {
   const b = await createBackup();
-  download(`calisma-masasi-yedek-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(b, null, 2), "application/json");
+  download(`defter-yedek-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(b, null, 2), "application/json");
   await markBackedUp();
   toast(`${num(b.highlights.length)} vurgu, ${num(b.marks?.length ?? 0)} işaret ve ${num(b.cards?.length ?? 0)} kart yedeklendi`);
   if (home) void refreshRecent();
@@ -416,7 +405,7 @@ async function openFile(file: File, handle?: FsHandle, extra: Partial<FileRecord
   progress?.(0, 0);
   const bytes = new Uint8Array(await file.arrayBuffer());
   if (!looksLikePdf(bytes)) {
-    showOpenError("Bu bir PDF değil", "Çalışma Masası yalnızca PDF açar.");
+    showOpenError("Bu bir PDF değil", "Defter yalnızca PDF açar.");
     return;
   }
   const hash = await sha256(bytes.buffer as ArrayBuffer);
@@ -626,7 +615,7 @@ function pickBundle(): void {
       await openFile(new File([bytes], pkg.name, { type: "application/pdf" }));
       toast(`Paket açıldı: ${num(pkg.highlights.length)} vurgu, ${num(pkg.marks.length)} işaret.`);
     } catch {
-      toast("Bu dosya bir Çalışma Masası paylaşım paketi değil.");
+      toast("Bu dosya bir Defter paylaşım paketi değil.");
     }
   });
   input.click();
@@ -738,7 +727,7 @@ async function showHome(): Promise<void> {
     },
   });
   app.replaceChildren(home.el);
-  document.title = "Çalışma Masası";
+  document.title = "Defter";
   await refreshRecent();
   // pdf.js açılış ekranı çizildikten sonra boşta yüklenir: ilk dosya beklemeden açılır.
   const idle = (window as Window & { requestIdleCallback?: (f: () => void) => void }).requestIdleCallback ?? ((f: () => void) => setTimeout(f, 800));
@@ -970,8 +959,12 @@ async function openReader(file: OpenDoc): Promise<void> {
   });
   pageInput.addEventListener("focus", () => pageInput.select());
   const zoomLabel = h("span", { class: "cm-num is-zoom", "aria-live": "polite" });
-  const zoomBtn = ghost("Genişlik ▾", { "aria-haspopup": "menu" });
+  // Yakınlaştırma tek düğmede: yüzde görünür, sığdırma ve adımlar menüde (Ctrl + / Ctrl − / Ctrl 0 her zaman çalışır).
+  const zoomBtn = ghost(zoomLabel, { class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--withicon cm-bar__zoom", "aria-haspopup": "menu", "aria-label": "Yakınlaştırma", title: "Yakınlaştırma (Ctrl + / Ctrl −)" }, icon("chev"));
   zoomBtn.addEventListener("click", () => openMenu(zoomBtn, [
+    { label: "Yakınlaştır", shortcut: "Ctrl +", run: () => viewer.zoomBy(1.1) },
+    { label: "Uzaklaştır", shortcut: "Ctrl −", run: () => viewer.zoomBy(1 / 1.1) },
+    "sep",
     { label: "Genişliğe sığdır", shortcut: "Ctrl 0", on: viewer.zoomMode === "width", run: () => viewer.setZoom("width") },
     { label: "Sayfaya sığdır", on: viewer.zoomMode === "page", run: () => viewer.setZoom("page") },
     "sep",
@@ -985,7 +978,6 @@ async function openReader(file: OpenDoc): Promise<void> {
   // Üst çubuk: sık kullanılan düğmeler simge; ad ve kısayol ipucunda ve ekran okuyucuda.
   const iconBtn = (name: string, label: string, attrs: Record<string, string | EventListener> = {}) =>
     h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--icon", "aria-label": label, title: label, ...attrs }, icon(name));
-  const themeBtn = iconBtn("moon", "Koyu tema", { class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--icon is-wide", onclick: () => void changeSettings({ ...settings, theme: resolvedTheme() === "dark" ? "light" : "dark" }) });
   const panelBtn = ghost(icon("panel"), { class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--count", title: "İşaretler paneli ( ] )", "aria-label": "İşaretler", "aria-pressed": String(panelOpen), onclick: () => {
     if (panelOpen && rightTab !== "marks") {
       aiOpenedPanel = false;
@@ -1005,43 +997,54 @@ async function openReader(file: OpenDoc): Promise<void> {
     "sep",
     { label: "Tekrar et", shortcut: "Alt T", run: () => openReview() },
   ], "right"));
-  const recBtn = iconBtn("mic", "Ses kaydı (Alt R)", { "aria-haspopup": "menu" });
+  // Ses kaydı düğmesi yalnızca kayıt sürerken görünür (kırmızı); başlatmak Diğer menüsünden ya da Alt R ile.
+  const recBtn = iconBtn("mic", "Ses kaydı (Alt R)", { "aria-haspopup": "menu", class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--icon is-desk" });
+  recBtn.hidden = true;
   recBtn.addEventListener("click", () => recordMenu(recBtn));
+  // Diğer: seyrek kullanılan görünüm ve araç komutları.
+  const moreBtn = iconBtn("more", "Diğer", { "aria-haspopup": "menu", class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--icon is-desk" });
+  moreBtn.addEventListener("click", () => openMenu(moreBtn, [
+    { label: "Odak modu", shortcut: "F", run: () => setFocus(!focusMode) },
+    { label: resolvedTheme() === "dark" ? "Açık tema" : "Koyu tema", run: () => void changeSettings({ ...settings, theme: resolvedTheme() === "dark" ? "light" : "dark" }) },
+    { label: "Sayfaya yer imi", shortcut: "B", run: () => toggleBookmark() },
+    "sep",
+    { label: viewer.scrollMode === "paged" ? "Sürekli kaydırma" : "Sayfa sayfa (slayt)", run: () => setScrollMode(viewer.scrollMode === "paged" ? "continuous" : "paged") },
+    { label: "Ses kaydı…", shortcut: "Alt R", run: () => recordMenu(moreBtn) },
+    { label: "Tekrar et", shortcut: "Alt T", run: () => openReview() },
+    "sep",
+    { label: "Ayarlar", run: settingsDialog },
+    { label: "Kısayollar", shortcut: "?", run: openShortcuts },
+  ], "right"));
   const aiBtn = ghost(icon("sparkle"), { class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--withicon", title: "AI paneli (Ctrl J)", "aria-label": "AI paneli", "aria-pressed": "false", onclick: () => toggleAi() }, h("span", { text: "AI" }));
-  const sep = () => h("span", { class: "cm-bar__sep" });
-
+  // Üst çubuk üç grup: solda nereye döneceğin ve dosya (altında kayıt durumu), ortada mod, sağda sayfa ve araçlar.
   const bar = h("header", { class: "cm-bar", role: "toolbar", "aria-label": "Okuyucu araç çubuğu" },
-    h("div", { class: "cm-bar__group" },
+    h("div", { class: "cm-bar__side" },
       // PDF'ten çık: kitaplığa (ana ekran) dön. Değişiklikler zaten kayıtlı.
       h("button", { class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--withicon cm-bar__home", title: "PDF'i kapat, kitaplığa dön", "aria-label": "Kitaplığa dön", onclick: () => void goHome() }, icon("back"), h("span", { class: "is-wide", text: "Kitaplık" })),
-      railBtn, fileBtn),
+      railBtn,
+      h("div", { class: "cm-bar__doc" },
+        fileBtn,
+        // Kayıt göstergesi Düzenle modunda da görünür (orada "çıkışta kopya alınır" uyarısını taşır).
+        h("span", { class: "cm-saved is-desk", role: "status", title: "Vurgu, not, yazı ve çizimler her değişiklikte bu tarayıcıya kaydedilir" }, icon("check"), h("span", { text: "Kaydedildi" })),
+      ),
+    ),
     modeSeg,
-    h("span", { class: "cm-bar__sep is-reader" }),
-    h("div", { class: "cm-bar__group is-reader", "aria-label": "Sayfa" },
-      ghost("‹", { "aria-label": "Önceki sayfa (K)", onclick: () => viewer.next(-1) }),
-      pageInput,
-      h("span", { class: "cm-muted cm-num", text: `/ ${num(file.doc.numPages)}` }),
-      ghost("›", { "aria-label": "Sonraki sayfa (J)", onclick: () => viewer.next(1) }),
-    ),
-    h("span", { class: "cm-bar__sep is-wide is-reader" }),
-    h("div", { class: "cm-bar__group is-wide is-reader", "aria-label": "Yakınlaştırma" },
-      ghost("−", { "aria-label": "Uzaklaştır (Ctrl −)", onclick: () => viewer.zoomBy(1 / 1.1) }),
-      zoomLabel,
-      ghost("+", { "aria-label": "Yakınlaştır (Ctrl +)", onclick: () => viewer.zoomBy(1.1) }),
-      zoomBtn,
-    ),
-    h("span", { class: "cm-bar__spacer" }),
-    // Kayıt göstergesi Düzenle modunda da görünür (orada "çıkışta kopya alınır" uyarısını taşır).
-    h("span", { class: "cm-saved is-desk", role: "status", title: "Vurgu, not, yazı ve çizimler her değişiklikte bu tarayıcıya kaydedilir" }, icon("check"), h("span", { text: "Kaydedildi" })),
-    h("div", { class: "cm-bar__group is-reader is-desk" },
-      iconBtn("search", "Ara (Ctrl F)", { onclick: () => search.open(window.getSelection()?.toString().trim() || undefined) }),
-      themeBtn,
-      iconBtn("focus", "Odak modu (F)", { class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--icon is-wide", onclick: () => setFocus(!focusMode) }),
-      exportBtn,
-      sep(),
-      recBtn,
-      panelBtn,
-      aiBtn,
+    h("div", { class: "cm-bar__side cm-bar__side--end" },
+      h("div", { class: "cm-bar__group is-reader cm-bar__pager", "aria-label": "Sayfa" },
+        ghost(icon("back"), { class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--icon is-wide", "aria-label": "Önceki sayfa (K)", title: "Önceki sayfa (K)", onclick: () => viewer.next(-1) }),
+        pageInput,
+        h("span", { class: "cm-muted cm-num", text: `/ ${num(file.doc.numPages)}` }),
+        ghost(icon("back"), { class: "cm-btn cm-btn--ghost cm-btn--sm cm-btn--icon is-wide cm-bar__next", "aria-label": "Sonraki sayfa (J)", title: "Sonraki sayfa (J)", onclick: () => viewer.next(1) }),
+      ),
+      h("div", { class: "cm-bar__group is-reader is-wide" }, zoomBtn),
+      h("div", { class: "cm-bar__group is-reader is-desk" },
+        iconBtn("search", "Ara (Ctrl F)", { onclick: () => search.open(window.getSelection()?.toString().trim() || undefined) }),
+        aiBtn,
+        exportBtn,
+        recBtn,
+        moreBtn,
+        panelBtn,
+      ),
     ),
   );
 
@@ -1139,8 +1142,6 @@ async function openReader(file: OpenDoc): Promise<void> {
     },
     remove: removeMark,
     redraw: drawMarks,
-    // El yazını öğret: tanıyıcıyla birlikte yalnızca açılınca yüklenir.
-    teach: () => void import("./ui/teach").then((m) => m.openTeach(announce)),
     pen: (pen) => void changeSettings({ ...settings, pen }),
     handwriting: (list, page, mode) => handwritingDialog(list, page, mode),
     announce,
@@ -1151,6 +1152,7 @@ async function openReader(file: OpenDoc): Promise<void> {
   const recorder: Recorder = new Recorder(() => {
     audio.render();
     recBtn.classList.toggle("is-rec", recorder.state !== "idle");
+    recBtn.hidden = recorder.state === "idle";
   });
   const audio: AudioBar = new AudioBar(recorder, {
     stop: () => reader && void finishRecording(reader),
@@ -1192,21 +1194,21 @@ async function openReader(file: OpenDoc): Promise<void> {
 
   const body = h("div", { class: "cm-body" }, rail.el, stageWrap, right);
   // Mobil: yüzen çubuk ve kalabalık üst bar yerine alta sabit gezinme.
-  const moreBtn = h("button", { class: "cm-btn cm-btn--ghost", "aria-haspopup": "menu" }, icon("more"), h("span", { text: "Diğer" }));
-  moreBtn.addEventListener("click", () => fileMenu(moreBtn, true));
+  const navMore = h("button", { class: "cm-btn cm-btn--ghost", "aria-haspopup": "menu" }, icon("more"), h("span", { text: "Diğer" }));
+  navMore.addEventListener("click", () => fileMenu(navMore, true));
   const mnav = h("nav", { class: "cm-mnav", "aria-label": "Gezinme" },
     h("button", { class: "cm-btn cm-btn--ghost", "data-nav": "rail", onclick: () => toggleRail() }, icon("pages"), h("span", { text: "Sayfalar" })),
     h("button", { class: "cm-btn cm-btn--ghost", "data-nav": "panel", onclick: () => togglePanel() }, icon("panel"), h("span", { text: "İşaretler" })),
     h("button", { class: "cm-btn cm-btn--ghost", onclick: () => search.open() }, icon("search"), h("span", { text: "Ara" })),
-    moreBtn,
+    navMore,
   );
   const root = h("div", { class: "cm-app" }, bar, band, body, mnav);
   app.replaceChildren(root);
-  document.title = `${file.rec.name} — Çalışma Masası`;
+  document.title = `${file.rec.name} — Defter`;
 
   reader = {
     file, root, body, band, stage, viewer, panel, rail, float, search, pageInput, zoomLabel,
-    panelBtn, railBtn, themeBtn, modeSeg, pageFlag, editor: null,
+    panelBtn, railBtn, modeSeg, pageFlag, editor: null,
     write, ai, aiBtn, rtabs, outline: [], mode: "read", recorder, audio,
   };
   renderModeSeg("read");
@@ -2888,12 +2890,22 @@ window.addEventListener("pagehide", () => {
 window.addEventListener("beforeunload", (e) => {
   if (reader?.editor?.changes) e.preventDefault();
 });
-matchMedia("(max-width: 1100px)").addEventListener("change", () => updateLayout());
+// Pencere daralınca (tablet döndürme, pencere küçültme) çekmeceler kapanır: sayfa hiç örtülmez.
+// Genişleyince kayıtlı tercih geri gelir.
+matchMedia("(max-width: 1100px)").addEventListener("change", (e) => {
+  if (reader) {
+    railOpen = e.matches ? false : settings.railOpen;
+    panelOpen = e.matches ? false : settings.panelOpen;
+  }
+  updateLayout();
+});
 
 // ---------- Başlangıç ----------
 
 async function boot(): Promise<void> {
   installErrorLog();
+  // Kaldırılan "El yazını öğret" özelliğinin bu cihazda kalan şablonları.
+  try { localStorage.removeItem("cm-hw-templates"); } catch { /* depolama kapalı */ }
   settings = await db.loadSettings();
   applySettings();
   registerPwa((files, handles) => {
@@ -2909,7 +2921,7 @@ void boot().catch((err) => {
     h("div", { class: "cm-notice cm-notice--err", role: "alert" },
       h("span", { class: "cm-notice__sym", "aria-hidden": "true", text: "×" }),
       h("div", {},
-        h("p", { class: "cm-notice__title", text: "Çalışma Masası başlatılamadı" }),
+        h("p", { class: "cm-notice__title", text: "Defter başlatılamadı" }),
         h("p", { class: "cm-notice__text", text: "Bu tarayıcı yerel saklamaya (IndexedDB) izin vermiyor olabilir; gizli pencerede ya da site verileri engelliyken olur. Normal bir pencerede yeniden dene." }),
       ),
     ),

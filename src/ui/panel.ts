@@ -8,6 +8,8 @@ import { colorClass, stickyLabel } from "../write/layer";
 import { richPlain } from "../write/rich";
 import { VirtualList, type VItem } from "./virtual";
 import { clock } from "../audio/recorder";
+import { openMenu } from "./menu";
+import { icon } from "./icons";
 
 export type SortBy = "page" | "time" | "color";
 type Kind = "all" | "hl" | "text" | "draw";
@@ -67,24 +69,22 @@ export class Panel {
     });
     this.chips = h("div", { class: "cm-chips", role: "group", "aria-label": "Renge göre filtrele" });
     this.kinds = h("div", { class: "cm-chips", role: "group", "aria-label": "Türe göre filtrele", hidden: true });
-    this.followBtn = h("button", { class: "cm-linkbtn is-on", "aria-pressed": "true", onclick: () => this.setFollow(!this.follow) }, "Sayfayı takip et");
-    const sortSel = h("select", { class: "cm-select", "aria-label": "Sırala" },
-      h("option", { value: "page", text: "Sırala: Sayfa" }),
-      h("option", { value: "time", text: "Sırala: Eklenme" }),
-      h("option", { value: "color", text: "Sırala: Renk" }),
-    );
-    sortSel.addEventListener("change", () => {
-      this.sort = sortSel.value as SortBy;
-      this.render();
-    });
-    const tools = h("div", { class: "cm-panel__tools" },
-      h("button", { class: "cm-linkbtn", onclick: () => this.toggleAll() }, "Tümünü daralt"),
-      this.followBtn,
-      sortSel,
-    );
+    // Sıralama, sayfayı takip ve daraltma tek menüde: filtre satırı tek satır kalır.
+    this.followBtn = h("button", {
+      class: "cm-chip cm-chip--icon cm-panel__view", "aria-haspopup": "menu", "aria-label": "Sıralama ve görünüm", title: "Sıralama ve görünüm",
+    }, icon("sort"));
+    this.followBtn.addEventListener("click", () => openMenu(this.followBtn, [
+      { label: "Sırala: sayfa", on: this.sort === "page", run: () => this.setSort("page") },
+      { label: "Sırala: eklenme", on: this.sort === "time", run: () => this.setSort("time") },
+      { label: "Sırala: renk", on: this.sort === "color", run: () => this.setSort("color") },
+      "sep",
+      { label: "Sayfayı takip et", hint: "panel okuduğun sayfaya kayar", on: this.follow, run: () => this.setFollow(!this.follow) },
+      { label: "Tümünü daralt / aç", run: () => this.toggleAll() },
+    ], "right"));
+    const filters = h("div", { class: "cm-panel__filters" }, this.chips, this.followBtn);
     const head = h("div", { class: "cm-panel__head" },
       h("div", { class: "cm-panel__title" }, h("span", { text: "İşaretler" }), this.countEl),
-      search, this.kinds, this.chips, tools,
+      search, this.kinds, filters,
     );
     this.list = h("div", { class: "cm-list", role: "list", tabindex: "-1" });
     this.list.addEventListener("keydown", this.onListKey);
@@ -192,9 +192,12 @@ export class Panel {
     this.follow = on;
     this.followPaused = false;
     this.returnBar.hidden = true;
-    this.followBtn.classList.toggle("is-on", on);
-    this.followBtn.setAttribute("aria-pressed", String(on));
     if (on) this.pageChanged(this.currentPage);
+  }
+
+  private setSort(by: SortBy): void {
+    this.sort = by;
+    this.render();
   }
 
   private resumeFollow(): void {
@@ -264,14 +267,21 @@ export class Panel {
     for (const it of this.items) counts.set(it.color, (counts.get(it.color) ?? 0) + 1);
     const chip = (label: Node[], on: boolean, onclick: () => void) =>
       h("button", { class: `cm-chip${on ? " is-on" : ""}`, "aria-pressed": String(on), onclick }, ...label);
+    const chipNamed = (name: string, label: Node[], on: boolean, onclick: () => void) => {
+      const b = chip(label, on, onclick);
+      b.setAttribute("aria-label", name);
+      b.title = name;
+      return b;
+    };
     this.chips.hidden = this.kind === "text" || this.kind === "draw";
     this.chips.replaceChildren(
       chip([document.createTextNode("Tümü "), h("span", { class: "cm-num", text: num(this.items.length) })], this.filter.size === 0, () => {
         this.filter.clear();
         this.render();
       }),
+      // Renk çipi: şekil ve sayı; tam ad ipucunda ve ekran okuyucuda (dar panelde tek satır kalır).
       ...COLORS.map((c) =>
-        chip([marker(c), document.createTextNode(this.names[c] + " "), h("span", { class: "cm-num", text: num(counts.get(c)!) })], this.filter.has(c), () => {
+        chipNamed(`${this.names[c]}: ${num(counts.get(c)!)}`, [marker(c), h("span", { class: "cm-num", text: num(counts.get(c)!) })], this.filter.has(c), () => {
           // Birden fazla çip seçilebilir.
           if (this.filter.has(c)) this.filter.delete(c);
           else this.filter.add(c);

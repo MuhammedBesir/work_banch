@@ -41,11 +41,11 @@ export function parseBackup(text: string): Backup {
   try {
     data = JSON.parse(text);
   } catch {
-    throw new Error("Bu dosya okunamadı. Çalışma Masası'ndan alınmış bir .json yedeği seç.");
+    throw new Error("Bu dosya okunamadı. Defter'den alınmış bir .json yedeği seç.");
   }
   const b = data as Partial<Backup>;
   if (b?.app !== "calisma-masasi" || !Array.isArray(b.highlights) || !Array.isArray(b.files)) {
-    throw new Error("Bu bir Çalışma Masası yedeği değil. Ayarlar'dan alınmış bir .json yedeği seç.");
+    throw new Error("Bu bir Defter yedeği değil. Ayarlar'dan alınmış bir .json yedeği seç.");
   }
   return b as Backup;
 }

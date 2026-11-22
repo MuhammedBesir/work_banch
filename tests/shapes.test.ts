@@ -107,36 +107,3 @@ describe("el yazısı düzgünleştirme", () => {
     expect(lineTilt([0, 1, 2, 3, 4].map((i) => letter(i, Math.tan((40 * Math.PI) / 180))), W, H)).toBe(0); // bilerek eğik çizim
   });
 });
-
-describe("el yazısı tanıma", () => {
-  it("rakam satırı ve kelime tanınır; karalama ve tek çizgi tanınmaz", async () => {
-    const { recognizeLine } = await import("../src/write/hwr");
-    const glyph: Record<string, Pt[][]> = {
-      "2": [[[0, 0.25], [0.15, 0.03], [0.4, 0], [0.55, 0.2], [0.4, 0.5], [0.05, 1], [0.6, 0.97]]],
-      "7": [[[0.02, 0.03], [0.58, 0], [0.22, 1]]],
-      "4": [[[0.4, 0.02], [0.02, 0.65], [0.6, 0.65]], [[0.42, 0.25], [0.42, 1]]],
-      e: [[[0.05, 0.72], [0.5, 0.7], [0.4, 0.48], [0.15, 0.48], [0.02, 0.75], [0.25, 1], [0.52, 0.92]]],
-      v: [[[0, 0.45], [0.27, 1], [0.55, 0.45]]],
-      t: [[[0.25, 0.1], [0.25, 1], [0.45, 0.97]], [[0.05, 0.45], [0.48, 0.43]]],
-    };
-    const dense = (s: Pt[]): Pt[] => s.flatMap((p, i) => (i < s.length - 1 ? [0, 1, 2, 3].map((k) => [p[0] + ((s[i + 1][0] - p[0]) * k) / 4, p[1] + ((s[i + 1][1] - p[1]) * k) / 4] as Pt) : [p]));
-    const line = (chars: string[], size = 30) => chars.flatMap((c, i) => glyph[c].map((st) => dense(st).map(([x, y]) => [(100 + i * 26 + x * size) / W, (300 + y * size) / H] as Pt)));
-    expect(recognizeLine(line(["2", "7", "4"]), W, H)?.text).toBe("274");
-    expect(recognizeLine(line(["e", "v", "e", "t"]), W, H)?.text).toBe("evet");
-    expect(recognizeLine([[[0.1, 0.3], [0.12, 0.31], [0.11, 0.3], [0.13, 0.32], [0.1, 0.33], [0.14, 0.3]]], W, H)).toBeNull();
-    expect(recognizeLine([dense([[0.2, 0.2], [0.2, 0.24]])], W, H)).toBeNull(); // tek dikey çizgi: madde imi / tik olabilir
-  });
-});
-
-describe("el yazısını öğrenme", () => {
-  it("düzeltilen harf kullanıcı şablonu olur, aynı biçim artık o harf tanınır", async () => {
-    const { classify, learn, forgetLearned } = await import("../src/write/hwr");
-    // "a"ya hiç benzemeyen tuhaf bir çizim: kullanıcı bunu "a" diye öğretir.
-    const odd: Pt[][] = [[[0, 0.5], [0.15, 0], [0.3, 1], [0.45, 0], [0.6, 1], [0.75, 0], [0.9, 0.5]]];
-    expect(classify(odd).ch).not.toBe("a");
-    learn("a", odd);
-    expect(classify(odd).ch).toBe("a");
-    forgetLearned();
-    expect(classify(odd).ch).not.toBe("a");
-  });
-});

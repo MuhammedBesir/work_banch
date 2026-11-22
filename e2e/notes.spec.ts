@@ -213,7 +213,8 @@ test("Şekiller: otomatik düzeltme, geri alınca ham çizim, yeni şekiller ve 
   await page.keyboard.press("Control+z");
   await expect(marks).toHaveCount(0);
   // Otomatik düzeltme kapatılınca çizim olduğu gibi kalır.
-  await page.getByRole("button", { name: /Otomatik düzeltme: açık/ }).click();
+  await page.getByRole("button", { name: /^Kalem ayarları/ }).click();
+  await page.getByRole("button", { name: "Otomatik düzeltme: kapalı" }).click();
   await stroke(Array.from({ length: 33 }, (_, i) => [300 + Math.cos((i / 32) * 2 * Math.PI) * 70, 150 + Math.sin((i / 32) * 2 * Math.PI) * 66] as [number, number]));
   await expect(page.locator('.cm-page[data-page="0"] .cm-ink ellipse')).toHaveCount(0);
   await expect(marks).toHaveCount(1);
@@ -244,15 +245,33 @@ test("Şekiller: otomatik düzeltme, geri alınca ham çizim, yeni şekiller ve 
   expect(await editing.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
   await page.getByRole("button", { name: "Yazıyı büyüt" }).click();
   await page.keyboard.press("Escape");
-  expect(parseFloat(await page.locator(".cm-textbox").evaluate((el) => (el as HTMLElement).style.getPropertyValue("--fs")))).toBeGreaterThan(16);
+  const tbox = page.locator(".cm-textbox");
+  const fs = parseFloat(await tbox.evaluate((el) => (el as HTMLElement).style.getPropertyValue("--fs")));
+  expect(fs).toBeGreaterThan(16);
+  // Seç aracında yan kenar tutamacı: kutu genişler, yazı boyutu aynı kalır.
+  await page.keyboard.press("v");
+  const tb0 = (await tbox.boundingBox())!;
+  await page.mouse.click(tb0.x + tb0.width / 2, tb0.y + tb0.height / 2);
+  await expect(page.locator(".cm-selbox__h")).toHaveCount(6);
+  const he = (await page.locator(".cm-selbox__h--e").boundingBox())!;
+  await page.mouse.move(he.x + he.width / 2, he.y + he.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(he.x + 120, he.y + he.height / 2, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(async () => (await tbox.boundingBox())!.width).toBeGreaterThan(tb0.width + 80);
+  expect(parseFloat(await tbox.evaluate((el) => (el as HTMLElement).style.getPropertyValue("--fs")))).toBe(fs);
 });
 
 test("El yazısı: eğik satır ara verince düzelir, Ctrl Z geri alır; yumuşatma düzeyi değişir", async ({ page }) => {
   await newNotebook(page);
   await page.keyboard.press("p");
-  // Bu testte yalnızca satır düzeltme: yazıya çevirme kapalı (öneri → otomatik → kapalı).
-  await page.getByRole("button", { name: /Yazıya çevir: öneri/ }).click();
-  await page.getByRole("button", { name: /Yazıya çevir: otomatik/ }).click();
+  // Kalem ayarları penceresi: yazıya çevirme yok; Esc pencereyi kapatır, Yaz modunda kalınır.
+  await page.getByRole("button", { name: /^Kalem ayarları/ }).click();
+  await expect(page.locator(".cm-pensheet")).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Yazıya çevir/ })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".cm-pensheet")).toBeHidden();
+  await expect(page.locator(".cm-palette")).toBeVisible();
   const box = (await page.locator('.cm-page[data-page="0"]').boundingBox())!;
   const tilt = Math.tan((8 * Math.PI) / 180);
   // Altı "harf", soldan sağa ~8° yükselen bir satırda.
@@ -272,51 +291,11 @@ test("El yazısı: eğik satır ara verince düzelir, Ctrl Z geri alır; yumuşa
   await expect.poll(async () => spread(await centers()), { timeout: 4_000 }).toBeLessThan(4);
   await page.keyboard.press("Control+z");
   await expect.poll(async () => spread(await centers())).toBeGreaterThan(12);
-  // Yumuşatma: hafif → güçlü → kapalı.
-  await page.getByRole("button", { name: /Yazı yumuşatma: hafif/ }).click();
-  await expect(page.getByRole("button", { name: /Yazı yumuşatma: güçlü/ })).toBeVisible();
-  await page.getByRole("button", { name: /Yazı yumuşatma: güçlü/ }).click();
-  await expect(page.getByRole("button", { name: /Yazı yumuşatma: kapalı/ })).toBeVisible();
-});
-
-test("El yazısı yazıya çevrilir: öneri çıkar, düzeltilir, Enter çevirir, Ctrl Z geri getirir; öğret penceresi", async ({ page }) => {
-  await newNotebook(page);
-  await page.keyboard.press("p");
-  const box = (await page.locator('.cm-page[data-page="0"]').boundingBox())!;
-  const write = async (pts: [number, number][], x: number, y: number, size = 34) => {
-    await page.mouse.move(box.x + x + pts[0][0] * size, box.y + y + pts[0][1] * size);
-    await page.mouse.down();
-    for (const [px, py] of pts.slice(1)) await page.mouse.move(box.x + x + px * size, box.y + y + py * size, { steps: 3 });
-    await page.mouse.up();
-  };
-  // "2" ve "5" elle (şablondan farklı noktalarla).
-  await write([[0, 0.25], [0.15, 0.03], [0.4, 0], [0.55, 0.2], [0.4, 0.5], [0.05, 1], [0.6, 0.97]], 100, 200);
-  await write([[0.55, 0.02], [0.08, 0.04], [0.05, 0.45], [0.35, 0.4], [0.55, 0.62], [0.45, 0.92], [0.05, 0.95]], 128, 200);
-  const ink = page.locator('.cm-page[data-page="0"] .cm-ink path');
-  await expect(ink).toHaveCount(2);
-  // Öneri kutusu: tanınan metin düzenlenebilir; düzeltip Enter.
-  const sug = page.getByRole("textbox", { name: /Tanınan yazı/ });
-  await expect(sug).toHaveValue("25", { timeout: 5_000 });
-  await expect(sug).toBeFocused();
-  await sug.fill("26");
-  await page.keyboard.press("Enter");
-  await expect(page.locator(".cm-textbox")).toHaveText("26");
-  await expect(ink).toHaveCount(0);
-  await page.keyboard.press("Control+z");
-  await expect(page.locator(".cm-textbox")).toHaveCount(0);
-  await expect(ink).toHaveCount(2);
-  // Düzeltilen "6" öğrenildi: öğret penceresinde rozet görünür.
-  await page.getByRole("button", { name: /El yazını öğret/ }).click();
-  await page.getByRole("button", { name: "Rakamlar" }).click();
-  await expect(page.locator(".cm-teach__cell", { hasText: "6" }).locator(".cm-teach__n")).toHaveText("1");
-  // Bir kutuya yazıp kaydet.
-  const cell = page.getByRole("img", { name: "7 karakterini yaz" }).or(page.locator('canvas[aria-label="7 karakterini yaz"]')).first();
-  const cb = (await cell.boundingBox())!;
-  await page.mouse.move(cb.x + 15, cb.y + 15);
-  await page.mouse.down();
-  await page.mouse.move(cb.x + 65, cb.y + 15, { steps: 4 });
-  await page.mouse.move(cb.x + 30, cb.y + 70, { steps: 4 });
-  await page.mouse.up();
-  await page.getByRole("button", { name: "Kaydet" }).click();
-  await expect(page.locator(".cm-dialog")).toHaveCount(0);
+  // Yumuşatma: varsayılan hafif; güçlü ve kapalı seçilir.
+  await page.getByRole("button", { name: /^Kalem ayarları/ }).click();
+  await expect(page.getByRole("button", { name: "Yazı yumuşatma: hafif" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Yazı yumuşatma: güçlü" }).click();
+  await expect(page.getByRole("button", { name: "Yazı yumuşatma: güçlü" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Yazı yumuşatma: kapalı" }).click();
+  await expect(page.getByRole("button", { name: "Yazı yumuşatma: kapalı" })).toHaveAttribute("aria-pressed", "true");
 });

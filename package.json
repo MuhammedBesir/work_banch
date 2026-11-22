@@ -1,9 +1,9 @@
 {
-  "name": "calisma-masasi",
+  "name": "defter",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Çalışma Masası: tarayıcıda çalışan PDF okuma, vurgulama ve not alma aracı.",
+  "description": "Defter: tarayıcıda çalışan PDF okuma, vurgulama ve not alma aracı.",
   "scripts": {
     "tokens": "node scripts/build-tokens.mjs && node scripts/copy-ocr.mjs",
     "dev": "npm run tokens && vite",
@@ -15,8 +15,6 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.134.0",
-    "@fontsource/ibm-plex-mono": "5.1.0",
-    "@fontsource/ibm-plex-sans": "5.1.0",
     "@fontsource/source-serif-4": "5.1.0",
     "@mlc-ai/web-llm": "0.2.85",
     "@tesseract.js-data/eng": "1.0.0",

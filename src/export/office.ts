@@ -23,7 +23,7 @@ export async function notesDocx(o: NotesInput): Promise<Blob> {
   const { Document, Packer, Paragraph, TextRun, HeadingLevel, ShadingType, ImageRun } = await import("docx");
   const children: InstanceType<typeof Paragraph>[] = [
     new Paragraph({ heading: HeadingLevel.TITLE, children: [new TextRun(o.title)] }),
-    new Paragraph({ children: [new TextRun({ text: `Çalışma Masası · ${new Date().toLocaleDateString("tr-TR", { day: "numeric", month: "long", year: "numeric" })}`, color: "6B655C", size: 18 })] }),
+    new Paragraph({ children: [new TextRun({ text: `Defter · ${new Date().toLocaleDateString("tr-TR", { day: "numeric", month: "long", year: "numeric" })}`, color: "6B655C", size: 18 })] }),
   ];
   const pages = new Set<number>([...o.highlights.map((x) => x.page), ...o.marks.filter((m) => m.kind !== "ink" && m.kind !== "shape").map((m) => m.page), ...o.handwriting.keys()]);
   for (const page of [...pages].sort((a, b) => a - b)) {
@@ -59,7 +59,7 @@ export async function notesDocx(o: NotesInput): Promise<Blob> {
     const hw = o.handwriting.get(page);
     if (hw?.trim()) children.push(new Paragraph({ spacing: { before: 80 }, children: [new TextRun({ text: "El yazısı: ", bold: true, size: 20, color: "57524A" }), new TextRun(hw.replace(/\n/g, " / "))] }));
   }
-  const doc = new Document({ creator: "Çalışma Masası", title: o.title, sections: [{ children }] });
+  const doc = new Document({ creator: "Defter", title: o.title, sections: [{ children }] });
   return Packer.toBlob(doc);
 }
 
@@ -100,7 +100,7 @@ export async function pagesPptx(title: string, images: { png: string; w: number;
   pptx.defineLayout({ name: "PDF", width: W, height: H });
   pptx.layout = "PDF";
   pptx.title = title;
-  pptx.company = "Çalışma Masası";
+  pptx.company = "Defter";
   images.forEach((img, i) => {
     const slide = pptx.addSlide();
     // Farklı oranlı sayfa ortalanır.

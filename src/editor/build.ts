@@ -69,7 +69,7 @@ export async function buildPdf(pages: EditPage[], sources: Map<string, Pick<Sour
   const mapPage = new Map<number, number>();
   pages.forEach((p, i) => p.src === "main" && !mapPage.has(p.index) && mapPage.set(p.index, i));
   addOutline(out, remapOutline(outline, mapPage));
-  out.setProducer("Çalışma Masası");
+  out.setProducer("Defter");
   return out.save();
 }
 

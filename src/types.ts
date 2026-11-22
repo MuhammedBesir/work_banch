@@ -45,8 +45,6 @@ export type Mark =
   | (MarkBase & { kind: "shape"; color: InkColor; width: number; shape: ShapeKind; from: [number, number]; to: [number, number] })
   | (MarkBase & {
       kind: "text"; color: InkColor; box: Rect; text: string; size?: number;
-      /** El yazısından çevrildiyse: harflerin çizgileri (düzeltmeden öğrenmek için) ve satırın sağ ucu / ortası / büyük harf boyu (0–1). */
-      hw?: { glyphs: { ch: string; strokes: [number, number][][] }[]; right: number; cy: number; cap: number };
     })
   | (MarkBase & { kind: "sticky"; box: Rect; text: string; collapsed?: boolean; ai?: boolean; pageNote?: boolean; tint?: StickyTint })
   | (MarkBase & { kind: "image"; box: Rect; src: string; alt: string });
@@ -192,7 +190,7 @@ export interface Settings {
   railOpen: boolean;
   panelOpen: boolean;
   ai: AiSettings;
-  pen: { color: InkColor; width: number; kind?: PenKind; custom?: string[]; textSize?: number; autoShape?: boolean; smooth?: number; autoText?: boolean; textMode?: "suggest" | "auto" | "off" };
+  pen: { color: InkColor; width: number; kind?: PenKind; custom?: string[]; textSize?: number; autoShape?: boolean; smooth?: number };
   /** İsteğe bağlı yerel hata günlüğü (hiçbir yere gönderilmez). */
   errorLog: boolean;
   /** Son açılanlar görünümü. */

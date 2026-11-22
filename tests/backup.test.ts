@@ -35,6 +35,6 @@ describe("yedek", () => {
 
   it("yabancı dosyayı açık bir mesajla reddeder", () => {
     expect(() => parseBackup("not json")).toThrow(/okunamadı/);
-    expect(() => parseBackup('{"foo":1}')).toThrow(/Çalışma Masası yedeği değil/);
+    expect(() => parseBackup('{"foo":1}')).toThrow(/Defter yedeği değil/);
   });
 });

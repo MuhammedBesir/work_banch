@@ -119,7 +119,7 @@ export async function exportAnnotatedPdf(source: Uint8Array, highlights: Highlig
       }
     }
   }
-  doc.setProducer("Çalışma Masası");
+  doc.setProducer("Defter");
   return doc.save();
 }
 
@@ -182,7 +182,7 @@ async function drawTextImage(doc: PDFDocument, g: PageGeom, m: Extract<Mark, { k
   const line = sticky ? 21 : 20;
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d")!;
-  const font = sticky ? `400 ${size * S}px "Source Serif 4", Georgia, serif` : `500 ${size * S}px "IBM Plex Sans", system-ui, sans-serif`;
+  const font = sticky ? `400 ${size * S}px "Source Serif 4", Georgia, serif` : `500 ${size * S}px -apple-system, "Segoe UI", system-ui, sans-serif`;
   ctx.font = font;
   const maxW = (wPt - pad * 2) * S;
   const lines: string[] = [];
@@ -208,7 +208,7 @@ async function drawTextImage(doc: PDFDocument, g: PageGeom, m: Extract<Mark, { k
   ctx.textBaseline = "top";
   lines.forEach((l, i) => {
     const header = sticky && i === 0;
-    ctx.font = header ? `500 ${11 * S}px "IBM Plex Sans", system-ui, sans-serif` : font;
+    ctx.font = header ? `500 ${11 * S}px -apple-system, "Segoe UI", system-ui, sans-serif` : font;
     ctx.fillStyle = header ? "#57524a" : sticky ? INK : css(inkRgb((m as Extract<Mark, { kind: "text" }>).color));
     ctx.fillText(l, pad * S, (pad + i * line + (line - size) / 2) * S);
   });
@@ -259,7 +259,7 @@ function addHighlightAnnot(doc: PDFDocument, g: PageGeom, h: Highlight, note: st
   const quads = boxes.flatMap(([x0, y0, x1, y1]) => [x0, y1, x1, y1, x0, y0, x1, y0]);
   addAnnot(doc, g.page, {
     Type: "Annot", Subtype: "Highlight", Rect: rect, QuadPoints: quads, C: toUnit(HL[h.color]), CA: PDFNumber.of(1),
-    Contents: PDFHexString.fromText(note ? `${name}: ${note}` : name), T: PDFHexString.fromText("Çalışma Masası"), M: nowDate(), F: 4,
+    Contents: PDFHexString.fromText(note ? `${name}: ${note}` : name), T: PDFHexString.fromText("Defter"), M: nowDate(), F: 4,
   });
 }
 
@@ -267,7 +267,7 @@ function addTextNote(doc: PDFDocument, g: PageGeom, at: Rect, text: string, colo
   const [x0, , , y1] = rectToPdf(g, at);
   addAnnot(doc, g.page, {
     Type: "Annot", Subtype: "Text", Rect: [x0 - 22, y1 - 18, x0 - 4, y1], Name: "Comment", C: toUnit(color),
-    Contents: PDFHexString.fromText(text), T: PDFHexString.fromText("Çalışma Masası"), M: nowDate(), F: 4, Open: false,
+    Contents: PDFHexString.fromText(text), T: PDFHexString.fromText("Defter"), M: nowDate(), F: 4, Open: false,
   });
 }
 
@@ -277,7 +277,7 @@ function addDrawingAnnot(doc: PDFDocument, g: PageGeom, m: Extract<Mark, { kind:
   const pdf = pts.map(([x, y]) => viewToPdf(g, x, y));
   const pad = m.width + 2;
   const rect = [Math.min(...pdf.map((p) => p[0])) - pad, Math.min(...pdf.map((p) => p[1])) - pad, Math.max(...pdf.map((p) => p[0])) + pad, Math.max(...pdf.map((p) => p[1])) + pad];
-  const base = { Type: "Annot", Rect: rect, C: toUnit(inkRgb(m.color)), BS: { W: m.width }, T: PDFHexString.fromText("Çalışma Masası"), M: nowDate(), F: 4 };
+  const base = { Type: "Annot", Rect: rect, C: toUnit(inkRgb(m.color)), BS: { W: m.width }, T: PDFHexString.fromText("Defter"), M: nowDate(), F: 4 };
   if (m.kind === "ink") {
     addAnnot(doc, g.page, { ...base, Subtype: "Ink", InkList: [pdf.flat()] });
   } else if (m.shape === "arrow") {

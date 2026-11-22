@@ -1,10 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="96" fill="#1f4e79"/>
-  <rect x="132" y="88" width="248" height="336" rx="10" fill="#ffffff"/>
-  <rect x="168" y="150" width="176" height="14" rx="4" fill="#cfc8ba"/>
-  <rect x="164" y="190" width="150" height="26" rx="5" fill="#f5d76e"/>
-  <rect x="168" y="240" width="176" height="14" rx="4" fill="#cfc8ba"/>
-  <rect x="168" y="276" width="140" height="14" rx="4" fill="#cfc8ba"/>
-  <rect x="164" y="306" width="120" height="26" rx="5" fill="#bddba6"/>
-  <rect x="168" y="356" width="160" height="14" rx="4" fill="#cfc8ba"/>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2f8cff"/>
+      <stop offset="1" stop-color="#0058c2"/>
+    </linearGradient>
+    <linearGradient id="spine" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#d9e3f0"/>
+      <stop offset="1" stop-color="#eef3f9"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="114" fill="url(#bg)"/>
+  <rect x="140" y="108" width="248" height="312" rx="30" fill="#00317a" opacity=".28"/>
+  <rect x="132" y="96" width="248" height="312" rx="30" fill="#fff"/>
+  <path d="M162 96h28v312h-28a30 30 0 0 1-30-30V126a30 30 0 0 1 30-30z" fill="url(#spine)"/>
+  <rect x="222" y="170" width="124" height="16" rx="8" fill="#c9d1dc"/>
+  <rect x="214" y="208" width="128" height="32" rx="9" fill="#ffd60a"/>
+  <rect x="222" y="262" width="124" height="16" rx="8" fill="#c9d1dc"/>
+  <rect x="222" y="300" width="88" height="16" rx="8" fill="#c9d1dc"/>
+  <path d="M300 96h40v104l-20-16-20 16z" fill="#ff3b30"/>
 </svg>

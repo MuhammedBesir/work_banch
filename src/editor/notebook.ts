@@ -10,7 +10,7 @@ const A4: [number, number] = [595.28, 841.89];
 export async function createNotebook(template: Template, pages: number, landscape = false, title = "Not defteri"): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   doc.setTitle(title);
-  doc.setProducer("Çalışma Masası");
+  doc.setProducer("Defter");
   for (let i = 0; i < pages; i++) addTemplatePage(doc, template, landscape ? [A4[1], A4[0]] : A4);
   return doc.save();
 }

@@ -3,6 +3,7 @@ import { DEFAULT_SETTINGS } from "./types";
 
 // Tüm veri bu tarayıcıda, IndexedDB'de yaşar. Hiçbir şey ağa gitmez.
 
+// Eski adla (Çalışma Masası) kalır: değişirse mevcut kullanıcıların kayıtlı verisi görünmez.
 const DB_NAME = "calisma-masasi";
 const VERSION = 4;
 

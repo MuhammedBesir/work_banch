@@ -1,10 +1,14 @@
-Çalışma Masası, üniversite öğrencisinin ders slaytlarını ve kitap PDF'lerini okuyup vurguladığı, not aldığı ve sınav öncesi topladığı, tamamen tarayıcıda çalışan bir araçtır. Saatlerce bakılacak bir yüzey: her karar okuma alanını öne çıkarmak, arayüzü geri çekmek için verildi.
+Defter, üniversite öğrencisinin ders slaytlarını ve kitap PDF'lerini okuyup vurguladığı, not aldığı ve sınav öncesi topladığı, tamamen tarayıcıda çalışan bir araçtır. Saatlerce bakılacak bir yüzey: her karar okuma alanını öne çıkarmak, arayüzü geri çekmek için verildi.
 
 ## İlkeler
 
+**Tek kaynak, tek katman.** Renk, yazı, köşe, gölge ve süre değerleri yalnızca `design/tokens.json`'da; `scripts/build-tokens.mjs` bunları `src/styles/tokens.css`'e yazar. Bileşenler (`cm-btn`, `cm-seg`, `cm-chip`, `cm-menu`, pencere, bant…) `src/styles/components.css`'te bir kez tanımlanır; ekrana özgü düzen `src/styles/app.css`'te. Üstüne binen ikinci bir tema dosyası ve bir bileşeni ezmek için `!important` yok. Görünüm: Apple tarzı sade (nötr gri, sistem yazı tipi, saç teli çizgi, buzlu cam yüzen öğeler).
+
 - **Sayfa baskındır.** 1440px'te okuma alanı ekranın en az %55'idir (sol şerit `rail-width` 120px + sağ panel `panel-width` 344px açıkken). Odak modunda (`F`) araç çubuğu ve paneller tamamen kaybolur.
-- **Kâğıt ve mürekkep.** Zemin `paper`, sayfa `sheet`, metin `ink`. Tek vurgu rengi mürekkep mavisi `accent`; ekranda en fazla bir birincil buton.
-- **Gölge yalnızca kâğıda.** `shadow-sheet` sadece PDF sayfasında, `shadow-float` sadece yüzen öğelerde (seçim araç çubuğu, pencereler). Kartlar, paneller gölgesiz; ayrım `line` ve `line-strong` çizgileriyle.
+- **Kâğıt ve mürekkep.** Zemin `paper`, sayfa `sheet`, metin `ink`. Tek vurgu rengi mavi `accent`; ekranda en fazla bir birincil (dolu mavi, `accent-fill`) düğme. Seçili araç ve çip birincil düğmeye benzemez: araç dolu mavi küçük kare, çip koyu dolgu, satır `accent-soft`.
+- **Gölge ve cam.** `shadow-sheet` PDF sayfasında ve kartlarda (saç teli çerçeve + çok hafif gölge); `shadow-float` yalnızca yüzen öğelerde (menü, palet, seçim ve biçim çubuğu, pencere, bildirim). Buzlu cam (`glass` + `backdrop-filter`) da yalnızca yüzen öğelerde. Paneller ve üst çubuk gölgesiz; ayrım `line` / `line-strong` saç teliyle.
+- **Üst çubuk üç grup.** Solda nereye döneceğin (‹ Kitaplık), sayfa şeridi ve dosya adı, adın altında kayıt durumu. Ortada mod seçici. Sağda sayfa (‹ 12 / 148 ›), yakınlaştırma (%110 ▾: sığdırma ve adımlar menüde), Ara, AI, Dışa aktar, Diğer (⋯: odak modu, tema, yer imi, kaydırma, ses kaydı, Tekrar, Ayarlar, Kısayollar) ve panel. Ses kaydı düğmesi yalnızca kayıt sürerken görünür.
+- **Simgeli düğmeye ad.** Yalnız simgeli her düğmede `aria-label` ve ipucu (`title`). Ayar düğmeleri değerini adında taşır: "Yazı yumuşatma: hafif". Seyrek eylemler yazıyla, menüde.
 - **Renk tek başına anlam taşımaz.** Her vurgu rengi bir şekille gelir: ● Önemli, ▲ Anlamadım, ■ Sınavda çıkar, ◆ Tanım. Şekil renge bağlıdır, ada değil: kullanıcı adı değiştirse de şekil kalır.
 - **Güven mesajı tek cümle.** "Dosyan bilgisayarından çıkmaz; açma, okuma ve vurgular tamamen bu tarayıcıda işlenir." Kalkan ikonu, rozet, "%100 güvenli" yok. Mesajın hemen yanında dürüst uyarı: vurgular bu tarayıcıda saklanır, tarayıcı verisi silinirse gider.
 
@@ -36,14 +40,14 @@
 - Arayüz Türkçe, ikinci tekil şahıs, kısa: "PDF'ini buraya bırak", "Dosyayı yeniden seç". "Lütfen", "Hata oluştu!" ve ünlem yok.
 - Hata mesajı iki parçadır: ne oldu + ne yapabilirsin. "Bu dosya açılamadı. … Dosyayı tekrar indirip yeniden dene."
 - Sayılar Türkçe biçimde: `1.840 sayfa`, `18,4 MB`, `%68`. Sayfa numaraları ve kısayollar `num` stiliyle (mono, hizalı rakam).
-- Emoji yok. Süs ikonu yok; düğmeler metin etiketlidir. Tek istisna yön işaretleri (‹ › − +) ve vurgu şekilleri.
+- Emoji yok, süs ikonu yok. Simge yalnızca sık kullanılan, tanınmış eylemlerde (ara, geri, panel, araçlar) ve her zaman adıyla (ipucu + ekran okuyucu); seyrek eylemler yazıyla.
 
 ## Renk
 
 - Zeminler: uygulama `paper`, paneller ve üst bar `surface`, yüzen öğeler ve pencereler `surface-raised`, PDF `sheet`.
 - Metin: `ink` ana metin, `ink-muted` ikincil. İkisi de `paper`, `surface`, `surface-raised` üstünde her iki temada 4.5:1 üzeri (en düşük `ink-muted` koyu `surface-raised` üstünde 5.8:1).
 - Kontroller: girdi ve ikincil buton kenarı `control-border` (3:1 üzeri). `line` sadece dekoratif ayraçtır, kontrol kenarı olarak kullanma.
-- Birincil eylem `accent` zemin + `on-accent` metin. Koyu temada `accent` açık maviye döner, üstündeki metin koyu `on-accent` olur; beyaz yazma.
+- Birincil eylem `accent-fill` zemin + beyaz metin; koyu temada `accent-fill` ayrı bir ton (#0071e3) olduğu için beyaz yazı orada da AA. `accent` (koyuda açık mavi) yalnızca bağlantı, seçili satır işareti ve odak için; üstüne beyaz yazılmaz.
 - Durum: `danger`/`danger-soft` bozuk dosya ve silme; `warning`/`warning-soft` taranmış PDF ve büyük dosya. Başarı rengi yok, gerek yok: başarı = içeriğin görünmesi.
 
 ### Vurgu renkleri
@@ -68,18 +72,17 @@ Varsayılan: **yumuşat**. PDF canvas katmanına `pdf-soften` filtresi (`brightn
 
 ## Tipografi
 
-**IBM Plex Sans arayüz için, Source Serif 4 notlar ve başlıklar için:** Plex'in ı/İ ve ş/ğ biçimleri küçük puntoda bile net ve dar panelde sıkışmadan okunuyor; Source Serif ise notları kitap kenarına yazılmış gibi arayüzden ayırıyor ve uzun okumada yorulmayan bir serif. Sayılar için IBM Plex Mono.
+**Arayüz sistem yazı tipinde** (`font-sans`: SF Pro, Segoe UI, Inter): her platformda yerel, indirme yok. Başlıklar `font-display` (SF Pro Display), harf aralığı −0,022em. **Kullanıcı notu serif** (`font-serif`: New York, Source Serif 4, Georgia): not, kitap kenarına yazılmış gibi arayüzden ayrışır. Rakamlar `font-variant-numeric: tabular-nums`; kod ve sayfa giriş kutusu dışında makine yazısı (mono) yok.
 
-- Arayüz metni `ui-md` (14/20). Araç çubuğu ve panel alıntıları `ui-sm` (13/18). Sayaçlar `ui-xs`.
-- Kullanıcı notu her yerde `note` (serif 15/23). Pencere başlıkları `title`, dosya açma başlığı `display` — başka hiçbir yerde `display` kullanma.
-- Sayfa numarası, zoom yüzdesi, klavye kısayolu `num`.
-- Ayarlar'daki "Büyük" yazı boyutu tüm ölçeği 14 → 16 taban ile çarpar; PDF bundan etkilenmez.
+- Ölçek: display 34/40 (yalnızca Kitaplık başlığı) · title 22/28 · pencere başlığı 19/24 · headline 17/22 · gövde 14/20 · açıklama 13/18 · küçük 12/16 · etiket 11/16 büyük harf.
+- Kullanıcı notu her yerde serif 15/23.
+- Ayarlar'daki "Büyük" yazı boyutu bütün arayüzü ölçekler; PDF bundan etkilenmez.
 
 ## Boşluk, köşe, boyut
 
 - 4px tabanlı: `space-1` 4 … `space-12` 48. Panel kenarı `space-4`, pencere içi `space-6`, PDF sayfaları arası `space-6`.
-- Köşeler küçük ve az: `radius-sm` 3 (vurgu, çip), `radius-md` 5 (buton, girdi, yüzen çubuk), `radius-lg` 8 (pencere). Daha yuvarlağı yok.
-- Üst bar `toolbar-height` 44px. Tıklama hedefi masaüstünde en az `target-min` 32px, dokunmatikte `target-touch` 44px.
+- Köşeler: `radius-sm` 6 (düğme, girdi), `radius-md` 10 (seçenek, menü öğesi), `radius-lg` 14 (kart, liste kutusu, palet), `radius-xl` 20 (pencere), `radius-pill` (filtre çipi, bildirim).
+- Üst bar `toolbar-height` 52px (dosya adının altında kayıt durumu sığsın diye). Tıklama hedefi masaüstünde en az `target-min` 32px, dokunmatikte `target-touch` 44px.
 
 ## Erişilebilirlik
 
