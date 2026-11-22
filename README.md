@@ -14,6 +14,10 @@
   <a href="docs/tasarim-sistemi.md">Tasarım sistemi</a>
 </p>
 
+<p align="center">
+  <img src="docs/media/okuyucu.png" width="900" alt="Defter okuyucusu: ders PDF'inde dört renkte vurgular, sağda İşaretler paneli ve bir not">
+</p>
+
 ---
 
 Defter, üniversite öğrencisinin ders slaytlarını ve kitap PDF'lerini tek yerde çalışması için yapıldı. Sunucusu, hesabı ve reklamı yok: açma, okuma, vurgular, el yazısı ve yedek bu tarayıcıda kalır. Yüklenebilir (PWA) ve çevrimdışı açılır.
@@ -30,6 +34,32 @@ Defter, üniversite öğrencisinin ders slaytlarını ve kitap PDF'lerini tek ye
 | **Tekrar** `Alt T` | Vurgulardan otomatik kartlar ve aralıklı tekrar. |
 
 Bunların yanında: **Kitaplık** (dersler, kapaklar, kaldığın yerden devam), **dışa aktarma** (Markdown, vurgulu PDF, Word, PowerPoint, PNG), **yedek ve paylaşım paketi**, taranmış sayfalar için **tarayıcıda OCR** ve isteğe bağlı **AI yardımcısı** (varsayılan kapalı; cihazda model ya da kendi API anahtarın).
+
+## Görüntüler
+
+**Vurgula ve not al.** Metni seç, renge tıkla; vurgu sağdaki panele düşer, altına not yazarsın.
+
+<p align="center"><img src="docs/media/vurgu.gif" width="900" alt="Metin seçilip sarı ve kırmızıyla vurgulanıyor, panelde vurguya not ekleniyor"></p>
+
+**Elle yaz.** Kalemle çizdiğin titrek daire kalem kalkınca düzgün elipse döner; ok çizip metin kutusuna not düşersin.
+
+<p align="center"><img src="docs/media/yaz.gif" width="900" alt="Yaz modunda formülün etrafına kırmızı daire çiziliyor, otomatik düzeliyor, ok ve metin kutusu ekleniyor"></p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/media/kitaplik.png" alt="Kitaplık: kaldığın yerden devam kartı, dersler ve son açılan PDF'ler"><br><sub><b>Kitaplık</b> · dersler, kapaklar, kaldığın yerden devam</sub></td>
+    <td width="50%"><img src="docs/media/yaz-modu.png" alt="Yaz modu: araç paleti, kırmızı elips, ok ve el yazısı not"><br><sub><b>Yaz modu</b> · kalem, şekil, metin kutusu</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/media/tekrar.png" alt="Tekrar modu: vurgudan oluşturulmuş soru kartı"><br><sub><b>Tekrar</b> · vurgulardan kartlar, aralıklı tekrar</sub></td>
+    <td width="50%"><img src="docs/media/koyu.png" alt="Koyu tema: sayfa ters çevrilmeden yumuşatılmış"><br><sub><b>Koyu tema</b> · sayfa ters çevrilmez, yumuşatılır</sub></td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/media/telefon.png" width="260" alt="Telefonda okuyucu: alt sekme çubuğu">
+  <br><sub><b>Telefonda</b> · alt sekme çubuğu, yüklenebilir uygulama</sub>
+</p>
 
 ## Gizlilik
 
