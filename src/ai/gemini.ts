@@ -159,11 +159,29 @@ export async function ask(o: AskBase, apiKey: string, model: string): Promise<As
     role: "user",
     parts: [...(o.image ? [{ inline_data: { mime_type: o.image.mediaType, data: o.image.base64 } }] : []), { text: promptText(o) }],
   });
-  return stream(model, apiKey, {
+  const body = (thinking: boolean) => ({
     systemInstruction: { parts: [{ text: o.system ?? SYSTEM }] },
     contents,
-    generationConfig: { maxOutputTokens: 16000 },
-  }, o.signal, o.onText, (m) => o.onNotice?.(`${model} yoğundu; bu cevap ${m} ile verildi.`));
+    generationConfig: { maxOutputTokens: 16000, ...(thinking ? thinkingFor(model) : {}) },
+  });
+  const notice = (m: string) => o.onNotice?.(`${model} yoğundu; bu cevap ${m} ile verildi.`);
+  try {
+    return await stream(model, apiKey, body(true), o.signal, o.onText, notice);
+  } catch (e) {
+    // Düşünme ayarını tanımayan model: ayarsız yeniden dene.
+    if (e instanceof GeminiError && e.status === 400 && /thinking/i.test(e.message)) return stream(model, apiKey, body(false), o.signal, o.onText, notice);
+    throw e;
+  }
+}
+
+/**
+ * Flash modelleri varsayılan olarak cevaptan önce uzun düşünür; ders sorusu için kısa düşünme yeter ve
+ * cevap birkaç saniye erken başlar. Gemini 3 ve takma adlar "low" düzeyi, 2.5 Flash bütçe 0 alır; Pro'da düşünme kapanmaz.
+ */
+export function thinkingFor(model: string): { thinkingConfig?: { thinkingLevel?: "low"; thinkingBudget?: number } } {
+  if (/gemini-2\.5-flash/.test(model)) return { thinkingConfig: { thinkingBudget: 0 } };
+  if (/-latest$/.test(model) || version(model) >= 3) return { thinkingConfig: { thinkingLevel: "low" } };
+  return {};
 }
 
 /** Anahtarın kullanabildiği sohbet modelleri (yeniden eskiye). */

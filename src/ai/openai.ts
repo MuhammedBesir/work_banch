@@ -16,7 +16,11 @@ export async function ask(o: AskBase, opts: { apiKey: string; model: string; bas
       : promptText(o),
   });
   const stream = await client.chat.completions.create(
-    { model: opts.model, messages, stream: true, stream_options: { include_usage: true } },
+    {
+      model: opts.model, messages, stream: true, stream_options: { include_usage: true },
+      // Akıl yürüten modeller (GPT-5, o-serisi, gpt-oss) varsayılan olarak uzun düşünür: kısa tut, cevap çabuk başlasın.
+      ...(/^(gpt-5|o\d)|gpt-oss/.test(opts.model) ? { reasoning_effort: "low" as const } : {}),
+    },
     { signal: o.signal },
   );
   let text = "";

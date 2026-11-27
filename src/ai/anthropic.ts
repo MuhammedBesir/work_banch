@@ -27,7 +27,8 @@ export async function ask(o: AskBase, apiKey: string, model: string): Promise<As
     {
       model,
       max_tokens: 16000,
-      output_config: { effort: "medium" },
+      // Düşünme bu modellerde hep açık; "low" ilk kelimeye kadarki beklemeyi kısaltır (ders sorusu için yeterli).
+      output_config: { effort: "low" },
       system: o.system ?? SYSTEM,
       messages,
       ...(fallback ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),

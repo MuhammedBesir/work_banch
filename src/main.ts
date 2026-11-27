@@ -2391,14 +2391,14 @@ async function areaCanvas(page: number, rect: Rect, maxSide: number): Promise<HT
 async function pageImage(page: number, rect: Rect, maxSide: number): Promise<AiContext["image"]> {
   const c = await areaCanvas(page, rect, maxSide);
   if (!c) return undefined;
-  const png = c.width * c.height < 1_200_000;
-  const url = c.toDataURL(png ? "image/png" : "image/jpeg", 0.9);
+  // JPEG: aynı görüntü birkaç kat küçük gider, istek daha çabuk ulaşır (yazı okunaklı kalır).
+  const url = c.toDataURL("image/jpeg", 0.85);
   const t = document.createElement("canvas");
   const k = Math.min(1, 220 / c.width);
   t.width = Math.round(c.width * k);
   t.height = Math.round(c.height * k);
   t.getContext("2d")!.drawImage(c, 0, 0, t.width, t.height);
-  return { base64: url.split(",")[1], mediaType: png ? "image/png" : "image/jpeg", thumb: t.toDataURL("image/jpeg", 0.8) };
+  return { base64: url.split(",")[1], mediaType: "image/jpeg", thumb: t.toDataURL("image/jpeg", 0.8) };
 }
 
 /** Metin katmanında kutunun içindeki yazı (satır sırasıyla). */
